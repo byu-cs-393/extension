@@ -23,7 +23,7 @@ A Canvas access token is **full impersonation** of the user who minted it. Whate
 - Post/edit submissions on their behalf.
 - Read course rosters, assignments, submissions.
 
-For the extension: the **instructor's** token is what lets the backend auto-write topic-exam pass-offs to Canvas grades. Jack's TA-level token can also be used to test the flow during development.
+For the extension: **Jack's TA-level token** is what will be used in production to auto-write topic-exam pass-offs to Canvas grades. A TA token only has power inside courses where Jack is a TA, which scopes the blast radius nicely — if leaked, an attacker can only mess with CS 393, not every course the instructor teaches. The same token works for local dev and production.
 
 ## Why this changes the architecture (re-emphasis)
 
@@ -37,18 +37,17 @@ This is exactly why the architecture from [architecture.md](architecture.md) kee
 flowchart LR
     EXT["Extension<br/>(no secrets)"] -->|POST /signoff| FN["Cloud Function"]
     FN -->|reads at request time| SM[("Secret Manager<br/>🔐 Canvas token")]
-    FN -->|impersonates instructor| CV["Canvas API"]
+    FN -->|impersonates Jack TA| CV["Canvas API"]
 ```
 
 ## Security rules for the token
 
-- Treat the token like a password. If it leaks, anyone can change any grade in any of the instructor's courses.
+- Treat the token like a password. If it leaks, anyone can change grades in CS 393 (any course where Jack is a TA).
 - **Only** store in Google Secret Manager. Never commit it to the repo. Never put it in `chrome.storage.*`. Never log it (not even truncated).
-- For local dev, Jack can use his own TA-level token in his own local `.env` (gitignored) — never the instructor's.
+- For local dev, the same token can be used — kept in a gitignored `.env` and matching the Secret Manager value.
 - Rotate (regenerate) at least once a semester, or immediately if compromise is suspected. Old tokens can be revoked from the same Integrations page.
 
 ## Action items added today
 
-- [ ] Instructor: generate the production Canvas token, store it in Secret Manager under e.g. `projects/cs393-496021/secrets/canvas-api-token`.
-- [ ] Jack: generate his own TA-level token for local dev, store in a gitignored `.env`.
+- [ ] Jack: generate his TA-level Canvas token; store it in Secret Manager under `projects/cs393-496021/secrets/canvas-api-token` (used in both production and local dev).
 - [ ] Backend code: read the secret via the Google Cloud client library, never from environment variables in deployed Functions.
