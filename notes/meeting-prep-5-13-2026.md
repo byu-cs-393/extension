@@ -6,6 +6,7 @@ Quick reference for today's meeting with the instructor. Carries the open questi
 - [topic-exam-5-12-2026.md](topic-exam-5-12-2026.md)
 - [ta-view-5-13-2026.md](ta-view-5-13-2026.md)
 - [data-model-5-13-2026.md](data-model-5-13-2026.md)
+- [onboarding-5-13-2026.md](onboarding-5-13-2026.md)
 
 Ordered by impact.
 
@@ -100,4 +101,4 @@ After today, update:
 - [topic-exam-5-12-2026.md](topic-exam-5-12-2026.md) — one type vs two decision
 - [ta-view-5-13-2026.md](ta-view-5-13-2026.md) — scheduler choice, multi-TA routing if relevant
 - A new privacy notes file — BYU statement scope + opt-in granularity
-- The onboarding flow notes (not yet committed) — Canvas OAuth yes/no
+- [onboarding-5-13-2026.md](onboarding-5-13-2026.md) — Canvas OAuth yes/no (and which path becomes the primary flow)
