@@ -1,6 +1,12 @@
-# Topic exam design — for discussion 2026-05-12
+# Topic exam design — resolved 2026-05-13
 
-**Status:** Pending — needs review with instructor. Captured here so the conversation has a concrete starting point. Follow-up to [ux-locked-5-12-2026.md](ux-locked-5-12-2026.md).
+**Status:** Resolved 2026-05-13 — **both exam types stay live.** The discussion below is kept as historical context for the trade-offs that were weighed. Follow-up to [ux-locked-5-12-2026.md](ux-locked-5-12-2026.md).
+
+## Decision (2026-05-13)
+
+**The performance exam will not be async.** Both performance and articulation topic exams remain live with a TA present (in person or Zoom).
+
+The async open questions at the bottom of this doc (paste-trigger behavior, problem-pool size, student access to recordings) are moot in the live model — paste handling becomes a TA judgment call during the session, and the rest belong to dashboard-layer decisions handled in [ta-view-5-13-2026.md](ta-view-5-13-2026.md).
 
 ---
 
