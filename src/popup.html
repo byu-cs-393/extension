@@ -3,29 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <title>CS 393 Buddy</title>
-    <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-        margin: 0;
-        padding: 16px;
-        width: 320px;
-        color: #1f2937;
-      }
-      h1 {
-        font-size: 14px;
-        font-weight: 600;
-        margin: 0 0 12px 0;
-      }
-      p {
-        font-size: 13px;
-        line-height: 1.5;
-        margin: 0;
-        color: #6b7280;
-      }
-    </style>
+    <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <h1>CS 393 Buddy</h1>
-    <p>Hello, CS 393. Extension loaded successfully.</p>
+    <header class="header">
+      <div class="brand">CS 393 Buddy</div>
+      <div class="sync-status">
+        <span class="sync-check" aria-hidden="true">✓</span>
+        <span>synced</span>
+      </div>
+    </header>
+
+    <section class="week">
+      <div class="week-label">Week 6</div>
+
+      <article class="card">
+        <div class="card-title">Recommended problems</div>
+        <div class="progress">
+          <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="3">
+            <div class="progress-fill"></div>
+          </div>
+          <div class="progress-text">3 / 12</div>
+        </div>
+        <div class="card-detail">Currently on: Two Sum II</div>
+        <button type="button" class="btn-primary">Next problem →</button>
+      </article>
+
+      <article class="card">
+        <div class="card-title">Topic Exam · Hash Maps</div>
+        <div class="card-warning">
+          <span class="warning-icon" aria-hidden="true">⚠</span>
+          <span>Due Wed</span>
+        </div>
+        <button type="button" class="btn-primary">Request signoff</button>
+      </article>
+    </section>
+
+    <div class="dashboard-link">
+      <button type="button" class="btn-secondary">Open full dashboard</button>
+    </div>
+
+    <footer class="footer">
+      <a href="#" role="button">⚙ Settings</a>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a href="#" role="button">🔒 Your data</a>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a href="#" role="button">🏆 Compete</a>
+    </footer>
   </body>
 </html>
