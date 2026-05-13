@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CS 393 Buddy · Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <div class="dashboard">
+      <header class="dashboard-header">
+        <div class="brand-block">
+          <span class="brand">CS 393 Buddy</span>
+          <span class="separator" aria-hidden="true">·</span>
+          <span class="term">Spring 2026</span>
+          <span class="sync-status">
+            <span class="sync-check" aria-hidden="true">✓</span>
+            <span>synced</span>
+          </span>
+        </div>
+        <div class="actions">
+          <button class="header-btn">🏆 Compete</button>
+          <button class="header-btn icon-only" title="Profile">👤</button>
+          <button class="header-btn icon-only" title="Settings">⚙</button>
+        </div>
+      </header>
+
+      <main>
+        <!-- Week 6 — current -->
+        <section class="week">
+          <div class="week-header">
+            <h2 class="week-title">
+              Week 6
+              <span class="week-badge">Current</span>
+            </h2>
+            <div class="week-dates">May 11 – 17</div>
+          </div>
+
+          <article class="card">
+            <div class="card-title">Recommended problems</div>
+            <div class="progress">
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="3">
+                <div class="progress-fill" style="width: 25%;"></div>
+              </div>
+              <div class="progress-text">3 / 12</div>
+            </div>
+            <div class="card-detail">Currently on: Two Sum II</div>
+            <div class="card-actions">
+              <button class="btn-primary">Next problem →</button>
+              <button class="btn-link">Show all ▼</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">Choice problems · 1 / 3</div>
+            <div class="card-detail">Solve any 3 problems this week — your pick</div>
+            <ul class="card-list">
+              <li class="complete">✓ Climbing Stairs</li>
+            </ul>
+            <div class="card-actions">
+              <button class="btn-primary">Pick problem</button>
+              <button class="btn-secondary">🎲 Surprise me</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">Topic Exam · Hash Maps</div>
+            <div class="card-detail">Solve a problem with a TA · 30 min</div>
+            <div class="card-actions">
+              <button class="btn-primary">Request signoff</button>
+            </div>
+          </article>
+        </section>
+
+        <!-- Week 5 — past, completed -->
+        <section class="week">
+          <div class="week-header">
+            <h2 class="week-title">Week 5</h2>
+            <div class="week-dates">May 4 – 10</div>
+          </div>
+
+          <article class="card">
+            <div class="card-title">Recommended problems</div>
+            <div class="progress">
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="12">
+                <div class="progress-fill complete" style="width: 100%;"></div>
+              </div>
+              <div class="progress-text">12 / 12 <span class="status-check" aria-hidden="true">✓</span></div>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">Mock Interview</div>
+            <div class="card-detail">Paired with Maria C. · 18 min</div>
+            <div class="card-status complete">✓ Completed</div>
+          </article>
+        </section>
+
+        <!-- Week 4 — past with past-due card -->
+        <section class="week">
+          <div class="week-header">
+            <h2 class="week-title">Week 4</h2>
+            <div class="week-dates">Apr 27 – May 3</div>
+          </div>
+
+          <article class="card">
+            <div class="card-title">Recommended problems</div>
+            <div class="progress">
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="10">
+                <div class="progress-fill warning" style="width: 83%;"></div>
+              </div>
+              <div class="progress-text">10 / 12 · <span class="warning-text">past due</span></div>
+            </div>
+            <div class="card-actions">
+              <button class="btn-secondary">Finish late</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">Online Assessment · Arrays &amp; Strings</div>
+            <div class="card-status complete">✓ Passed (attempt 2 of 3)</div>
+          </article>
+        </section>
+
+        <div class="more-hint" aria-hidden="true">⋮ scroll for earlier weeks ⋮</div>
+      </main>
+    </div>
+  </body>
+</html>
