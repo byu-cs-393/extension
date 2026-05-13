@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "CS 393 Buddy",
+  "version": "0.0.1",
+  "description": "Track your CS 393 weekly LeetCode work, pass off topic exams with a TA, and stay synced with Canvas.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CS 393 Buddy"
+  }
+}
