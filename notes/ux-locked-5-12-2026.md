@@ -82,8 +82,7 @@ Week 6 below shows the maximum case — all three card types stacked. Most weeks
 ║  ━━━━━ Week 4 ━━━━━━━━━━━━━━━━━━━━━━━━ Apr 27 – May 3 ━  ║
 ║                                                            ║
 ║   ┌─ Recommended problems ───────────────────────────┐    ║
-║   │  ▓▓▓▓▓▓▓▓▓▓░░  10 / 12 · past due                │    ║
-║   │  [ Finish late ]                                 │    ║
+║   │  ▓▓▓▓▓▓▓▓▓▓░░  10 / 12                           │    ║
 ║   └──────────────────────────────────────────────────┘    ║
 ║                                                            ║
 ║   ┌─ Online Assessment · Arrays & Strings ───────────┐    ║
@@ -214,8 +213,8 @@ The third attempt is functionally a guided learning session: by the time a stude
 | Decision | Why |
 |---|---|
 | Topic-exam signoff is **student-initiated** (button lives in the student popup) | Resolves UX-doc open question #1. Student says "I'm ready"; TA confirms via TA-mode dashboard. |
-| Past weeks **remain clickable for late completion** (`[Finish late]`) | The course doesn't enforce hard weekly deadlines in the UI. Falling-behind detection runs in the background regardless. |
-| Future weeks are **hidden** until released (Duolingo-style) | Reduces overwhelm. Canvas-style "the whole semester is laid out" would work too — picked Duolingo on instinct. *(Worth re-checking with the instructor.)* |
+| **Past-week recommended problems are locked** — no late completion. Past-week **topic exams, mock interviews, and online assessments** can still be done late. | Asymmetric rule reflects the course philosophy: recommended problems prove *consistent practice* (time-sensitive); the others prove *competency* (time-agnostic). Updated 2026-05-13 — supersedes the earlier "all past work is late-completable" decision. |
+| Dashboard shows only **current + past** weeks. Future weeks live on a separate **Full course** page reached from the dashboard header. | Keeps the dashboard focused on "do the work" while giving future weeks their own design space (faded cards with locked badges). Updated 2026-05-13 — supersedes the earlier "Duolingo-style hidden future weeks" decision. |
 | Each topic exam has a **topic name** ("Hash Maps", "Dynamic Programming") | Matches the meeting transcript and gives students context for what they're being tested on. Data model needs `topicExam.topic` per week. |
 | Online assessment is **pass/fail with 3 attempts**, each easier, third one untimed and collaborative | Reflects the actual structure of the assessment as designed for the course. The third attempt is intentionally a learning experience, not a final hurdle. |
 | Mock-interview partner shown **by first name + last initial** | Classmates can already see each other on Canvas — not a new disclosure. |
@@ -237,6 +236,7 @@ The third attempt is functionally a guided learning session: by the time a stude
 
 These are deferred to subsequent design sessions:
 
+- **Full course page** (`course.html`). Same scroll layout as the dashboard but shows every week of the semester — future weeks faded with locked badges (`🔒 Released May 18`), current week with its "Current" badge as the "you are here" anchor, past weeks as on the dashboard. Reached via a `📅 Full course` button in the dashboard header. Future weeks are read-only — students can see what's coming but can't start the work early.
 - **TA-mode dashboard.** Same scroll layout, but each row shows pending signoff requests with a `[Pass off]` action. Likely also surfaces falling-behind / copy-paste alerts inline rather than only via email/Teams.
 - **Compete flow.** Click → matchmaking → head-to-head → result.
 - **Profile / history page.** Keystroke playback, weekly rank, badges.
