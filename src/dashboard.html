@@ -121,6 +121,24 @@
         </section>
 
         <div class="more-hint" aria-hidden="true">⋮ scroll for earlier weeks ⋮</div>
+
+        <section class="debug-panel">
+          <h3>Debug · write to Firestore</h3>
+          <form id="student-form" class="debug-form">
+            <label>
+              Name
+              <input type="text" id="input-name" placeholder="e.g. Jack" autocomplete="off" />
+            </label>
+            <label>
+              Note
+              <input type="text" id="input-note" placeholder="e.g. tired today" autocomplete="off" />
+            </label>
+            <div>
+              <button type="submit" class="btn-primary">Save to Firestore</button>
+            </div>
+            <div id="form-status" class="debug-status" role="status" aria-live="polite"></div>
+          </form>
+        </section>
       </main>
     </div>
 
