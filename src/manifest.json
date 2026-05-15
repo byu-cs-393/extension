@@ -9,5 +9,12 @@
   },
   "host_permissions": [
     "https://firestore.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["leetcode-tracker.js"],
+      "run_at": "document_idle"
+    }
   ]
 }
