@@ -1,13 +1,15 @@
 import { firebaseConfig } from "./firebase-config.js";
 
-// Fetch a student document from Firestore via the REST API.
+// Hardcoded until onboarding wires the real netID into extension storage.
+const STUDENT_NETID = "test123";
+
+const FIRESTORE_BASE =
+  `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
+  `/databases/(default)/documents`;
+
 // Skipping the Firebase JS SDK for now — no bundler set up yet.
 async function fetchStudent(netID) {
-  const url =
-    `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
-    `/databases/(default)/documents/students/${netID}` +
-    `?key=${firebaseConfig.apiKey}`;
-
+  const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Firestore returned ${response.status}: ${response.statusText}`);
@@ -28,11 +30,20 @@ function parseFirestoreFields(fields) {
   return result;
 }
 
-(async () => {
+function renderStudent(student) {
+  const nameEl = document.getElementById("student-name");
+  nameEl.textContent = student?.name || "friend";
+}
+
+async function loadAndRender() {
   try {
-    const student = await fetchStudent("test123");
+    const student = await fetchStudent(STUDENT_NETID);
     console.log("Loaded student from Firestore:", student);
+    renderStudent(student);
   } catch (error) {
     console.error("Failed to load student:", error);
+    document.getElementById("student-name").textContent = "friend";
   }
-})();
+}
+
+loadAndRender();

@@ -110,6 +110,14 @@ body {
   font-size: 14px;
 }
 
+/* Greeting */
+.greeting {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+}
+
 /* Week section */
 .week {
   margin-bottom: 36px;
