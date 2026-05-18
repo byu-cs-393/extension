@@ -1,9 +1,9 @@
-// Content script: detects when the student opens a LeetCode problem and
-// logs an open_problem event to Firestore's top-level activity collection.
+// Content script: detects LeetCode problem opens AND submission verdicts,
+// logs each as an event in the top-level Firestore `activity` collection.
 //
-// We can't use ES module imports in a MV3 content script, so the public
-// Firebase config is inlined here. Safe to commit — access is gated by
-// Firestore security rules, not the API key.
+// MV3 content scripts can't use ES module imports, so the public Firebase
+// config is inlined. Safe to commit — Firestore security rules (not the
+// API key) gate access.
 const firebaseConfig = {
   apiKey: "AIzaSyC2RxnVrQii0rT-Tm3JZmURmHzico-VqDg",
   projectId: "cs393-496021",
@@ -13,9 +13,17 @@ const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
   `/databases/(default)/documents`;
 
-// Filled in from chrome.storage.sync at bootstrap. If onboarding hasn't
-// happened yet, we silently no-op rather than logging unattributed events.
-let netID = null;
+// All LeetCode verdicts we recognize. Pass means submit_pass, anything
+// else (including compile/runtime errors) means submit_fail.
+const VERDICTS = {
+  Accepted: "submit_pass",
+  "Wrong Answer": "submit_fail",
+  "Time Limit Exceeded": "submit_fail",
+  "Memory Limit Exceeded": "submit_fail",
+  "Output Limit Exceeded": "submit_fail",
+  "Runtime Error": "submit_fail",
+  "Compile Error": "submit_fail",
+};
 
 // LeetCode problem URLs look like:
 //   https://leetcode.com/problems/two-sum/
@@ -33,22 +41,39 @@ function slugToTitle(slug) {
     .join(" ");
 }
 
-async function logOpenProblem(slug) {
+// LeetCode sets document.title to e.g. "Two Sum - LeetCode" on a problem
+// page. Strip the suffix and use that as the title; fall back to a
+// title-cased slug if it's missing/empty.
+function getProblemTitle(slug) {
+  const stripped = document.title.replace(/\s*[-–]\s*LeetCode\s*$/i, "").trim();
+  return stripped || slugToTitle(slug);
+}
+
+function encodeFirestoreFields(obj) {
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string") result[key] = { stringValue: value };
+    else if (typeof value === "number") result[key] = { doubleValue: value };
+    else if (typeof value === "boolean") result[key] = { booleanValue: value };
+    else if (value instanceof Date) result[key] = { timestampValue: value.toISOString() };
+    else throw new Error(`Unsupported field type for ${key}: ${typeof value}`);
+  }
+  return result;
+}
+
+async function postActivityEvent(fields) {
   const url = `${FIRESTORE_BASE}/activity?key=${firebaseConfig.apiKey}`;
-  const body = {
-    fields: {
-      studentNetID: { stringValue: netID },
-      eventType: { stringValue: "open_problem" },
-      source: { stringValue: "leetcode" },
-      problemSlug: { stringValue: slug },
-      problemTitle: { stringValue: slugToTitle(slug) },
-      timestamp: { timestampValue: new Date().toISOString() },
-    },
-  };
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      fields: encodeFirestoreFields({
+        studentNetID: netID,
+        source: "leetcode",
+        timestamp: new Date(),
+        ...fields,
+      }),
+    }),
   });
   if (!response.ok) {
     const errorBody = await response.text();
@@ -57,40 +82,122 @@ async function logOpenProblem(slug) {
   return response.json();
 }
 
-// LeetCode is a SPA — URL changes without a full page load. Debounce by
-// tracking the last slug we logged so we don't fire twice for the same
-// problem on description/submissions tab switches.
-let lastLoggedSlug = null;
+// ---- runtime state ------------------------------------------------------
 
-async function maybeLogCurrent() {
-  const slug = parseProblemSlug(location.href);
-  if (!slug || slug === lastLoggedSlug) return;
+let netID = null;
+let lastLoggedSlug = null;       // dedupe open_problem on SPA tab switches
+let lastVerdict = null;          // current verdict text visible on the page
+let lastVerdictSlug = null;      // which problem the lastVerdict belongs to
+
+async function logOpenProblem(slug) {
+  if (!netID || slug === lastLoggedSlug) return;
   lastLoggedSlug = slug;
   try {
-    await logOpenProblem(slug);
-    console.log(`[CS 393 Buddy] logged open_problem: ${slug}`);
+    await postActivityEvent({
+      eventType: "open_problem",
+      problemSlug: slug,
+      problemTitle: getProblemTitle(slug),
+    });
+    console.log(`[CS 393 Buddy] open_problem: ${slug}`);
   } catch (error) {
     console.error("[CS 393 Buddy] failed to log open_problem:", error);
   }
 }
 
-// Fire on initial load and any client-side navigation. LeetCode uses
-// history.pushState, which doesn't emit popstate — patch it so we get
-// notified.
+async function logVerdict(slug, verdict) {
+  if (!netID) return;
+  const eventType = VERDICTS[verdict];
+  try {
+    await postActivityEvent({
+      eventType,
+      verdict,
+      problemSlug: slug,
+      problemTitle: getProblemTitle(slug),
+    });
+    console.log(`[CS 393 Buddy] ${eventType}: ${slug} (${verdict})`);
+  } catch (error) {
+    console.error("[CS 393 Buddy] failed to log verdict:", error);
+  }
+}
+
+// ---- verdict detection --------------------------------------------------
+
+// Walk visible spans/divs looking for an element whose trimmed text is
+// exactly one of our known verdicts. Returns the verdict string or null.
+function findVerdictInDOM() {
+  const candidates = document.querySelectorAll("span, div");
+  for (const el of candidates) {
+    const text = el.textContent?.trim();
+    if (text && VERDICTS[text]) return text;
+  }
+  return null;
+}
+
+function checkForVerdict() {
+  const slug = parseProblemSlug(location.href);
+  if (!slug) return;
+
+  // When the user navigates to a different problem, reset state so the
+  // next verdict on the new problem fires cleanly.
+  if (slug !== lastVerdictSlug) {
+    lastVerdictSlug = slug;
+    lastVerdict = null;
+  }
+
+  const found = findVerdictInDOM();
+  if (found && found !== lastVerdict) {
+    lastVerdict = found;
+    logVerdict(slug, found);
+  } else if (!found) {
+    // Verdict cleared (e.g., a new submission is in progress). Reset so
+    // the next verdict — even if it's the same string — will fire.
+    lastVerdict = null;
+  }
+}
+
+// MutationObserver fires on every DOM change, which on LeetCode is
+// constant. Throttle to once per ~200ms; the verdict only matters when
+// it lands, not the exact frame it arrives.
+let scheduled = false;
+function scheduleVerdictCheck() {
+  if (scheduled) return;
+  scheduled = true;
+  setTimeout(() => {
+    scheduled = false;
+    checkForVerdict();
+  }, 200);
+}
+
+// ---- SPA navigation -----------------------------------------------------
+
+// LeetCode uses history.pushState for client-side nav, which doesn't
+// emit popstate. Patch pushState to dispatch our own event so we can
+// detect problem-to-problem navigation.
 const origPushState = history.pushState;
 history.pushState = function (...args) {
   origPushState.apply(this, args);
   window.dispatchEvent(new Event("locationchange"));
 };
-window.addEventListener("popstate", maybeLogCurrent);
-window.addEventListener("locationchange", maybeLogCurrent);
+
+function onLocationChange() {
+  const slug = parseProblemSlug(location.href);
+  if (slug) logOpenProblem(slug);
+}
+
+// ---- bootstrap ----------------------------------------------------------
 
 (async () => {
   const { netID: stored } = await chrome.storage.sync.get("netID");
   if (!stored) {
-    console.log("[CS 393 Buddy] no netID set — skipping. Run onboarding first.");
+    console.log("[CS 393 Buddy] no netID set — skipping LeetCode tracking. Run onboarding first.");
     return;
   }
   netID = stored;
-  maybeLogCurrent();
+
+  window.addEventListener("popstate", onLocationChange);
+  window.addEventListener("locationchange", onLocationChange);
+  onLocationChange();
+
+  const observer = new MutationObserver(scheduleVerdictCheck);
+  observer.observe(document.body, { childList: true, subtree: true });
 })();
