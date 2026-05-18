@@ -7,9 +7,13 @@
     "default_popup": "popup.html",
     "default_title": "CS 393 Buddy"
   },
+  "permissions": ["storage"],
   "host_permissions": [
     "https://firestore.googleapis.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://leetcode.com/problems/*"],

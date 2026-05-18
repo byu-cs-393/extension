@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CS 393 Buddy · Setup</title>
+    <link rel="stylesheet" href="onboard.css" />
+  </head>
+  <body>
+    <main class="onboard">
+      <header class="onboard-header">
+        <div class="brand">CS 393 Buddy</div>
+        <div class="step">Setup</div>
+      </header>
+
+      <h1>Welcome to CS 393 Buddy</h1>
+      <p class="lede">
+        Track your weekly LeetCode work, pass off topic exams with a TA, and stay synced with
+        Canvas.
+      </p>
+
+      <form id="onboard-form" class="onboard-form">
+        <label for="input-netid">
+          BYU netID
+          <span class="hint">e.g. <code>jdoe7</code></span>
+        </label>
+        <input
+          type="text"
+          id="input-netid"
+          name="netid"
+          autocomplete="username"
+          autocapitalize="off"
+          spellcheck="false"
+          required
+          placeholder="netID"
+        />
+        <button type="submit" class="btn-primary">Continue →</button>
+        <div id="onboard-status" class="onboard-status" role="status" aria-live="polite"></div>
+      </form>
+
+      <p class="footnote">
+        For now we just store your netID locally. The full setup (Canvas verification, LeetCode
+        link, privacy disclosure) is coming.
+      </p>
+    </main>
+
+    <script type="module" src="onboard.js"></script>
+  </body>
+</html>

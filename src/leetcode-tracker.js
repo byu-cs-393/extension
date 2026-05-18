@@ -9,12 +9,13 @@ const firebaseConfig = {
   projectId: "cs393-496021",
 };
 
-// Hardcoded until onboarding wires the real netID into extension storage.
-const STUDENT_NETID = "test123";
-
 const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
   `/databases/(default)/documents`;
+
+// Filled in from chrome.storage.sync at bootstrap. If onboarding hasn't
+// happened yet, we silently no-op rather than logging unattributed events.
+let netID = null;
 
 // LeetCode problem URLs look like:
 //   https://leetcode.com/problems/two-sum/
@@ -36,7 +37,7 @@ async function logOpenProblem(slug) {
   const url = `${FIRESTORE_BASE}/activity?key=${firebaseConfig.apiKey}`;
   const body = {
     fields: {
-      studentNetID: { stringValue: STUDENT_NETID },
+      studentNetID: { stringValue: netID },
       eventType: { stringValue: "open_problem" },
       source: { stringValue: "leetcode" },
       problemSlug: { stringValue: slug },
@@ -83,4 +84,13 @@ history.pushState = function (...args) {
 };
 window.addEventListener("popstate", maybeLogCurrent);
 window.addEventListener("locationchange", maybeLogCurrent);
-maybeLogCurrent();
+
+(async () => {
+  const { netID: stored } = await chrome.storage.sync.get("netID");
+  if (!stored) {
+    console.log("[CS 393 Buddy] no netID set — skipping. Run onboarding first.");
+    return;
+  }
+  netID = stored;
+  maybeLogCurrent();
+})();

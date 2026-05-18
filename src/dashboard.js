@@ -1,11 +1,13 @@
 import { firebaseConfig } from "./firebase-config.js";
 
-// Hardcoded until onboarding wires the real netID into extension storage.
-const STUDENT_NETID = "test123";
-
 const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
   `/databases/(default)/documents`;
+
+async function getNetID() {
+  const { netID } = await chrome.storage.sync.get("netID");
+  return netID || null;
+}
 
 // Skipping the Firebase JS SDK for now — no bundler set up yet.
 async function fetchStudent(netID) {
@@ -64,9 +66,9 @@ function renderStudent(student) {
   nameEl.textContent = student?.name || "friend";
 }
 
-async function loadAndRender() {
+async function loadAndRender(netID) {
   try {
-    const student = await fetchStudent(STUDENT_NETID);
+    const student = await fetchStudent(netID);
     console.log("Loaded student from Firestore:", student);
     renderStudent(student);
     document.getElementById("input-name").value = student?.name ?? "";
@@ -77,7 +79,7 @@ async function loadAndRender() {
   }
 }
 
-function wireForm() {
+function wireForm(netID) {
   const form = document.getElementById("student-form");
   const status = document.getElementById("form-status");
   form.addEventListener("submit", async (event) => {
@@ -97,10 +99,10 @@ function wireForm() {
     status.textContent = "Saving…";
     status.className = "debug-status";
     try {
-      await updateStudent(STUDENT_NETID, fields);
+      await updateStudent(netID, fields);
       status.textContent = "Saved.";
       status.className = "debug-status success";
-      await loadAndRender();
+      await loadAndRender(netID);
     } catch (error) {
       console.error(error);
       status.textContent = `Failed: ${error.message}`;
@@ -109,5 +111,13 @@ function wireForm() {
   });
 }
 
-loadAndRender();
-wireForm();
+(async () => {
+  const netID = await getNetID();
+  if (!netID) {
+    // No netID yet — punt to onboarding.
+    window.location.href = chrome.runtime.getURL("onboard.html");
+    return;
+  }
+  loadAndRender(netID);
+  wireForm(netID);
+})();
