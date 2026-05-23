@@ -19,20 +19,44 @@
       </p>
 
       <form id="onboard-form" class="onboard-form">
-        <label for="input-netid">
-          BYU netID
-          <span class="hint">e.g. <code>jdoe7</code></span>
-        </label>
-        <input
-          type="text"
-          id="input-netid"
-          name="netid"
-          autocomplete="username"
-          autocapitalize="off"
-          spellcheck="false"
-          required
-          placeholder="netID"
-        />
+        <div class="field">
+          <label for="input-netid">
+            BYU netID
+            <span class="hint">e.g. <code>jdoe7</code></span>
+          </label>
+          <input
+            type="text"
+            id="input-netid"
+            name="netid"
+            autocomplete="username"
+            autocapitalize="off"
+            spellcheck="false"
+            required
+            placeholder="netID"
+          />
+        </div>
+
+        <div class="field">
+          <label for="input-name">
+            Display name
+            <span class="hint">how the dashboard greets you</span>
+          </label>
+          <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
+        </div>
+
+        <div class="field">
+          <label for="input-note">
+            Status note
+            <span class="hint">optional</span>
+          </label>
+          <input
+            type="text"
+            id="input-note"
+            autocomplete="off"
+            placeholder="e.g. focused on hash maps this week"
+          />
+        </div>
+
         <button type="submit" class="btn-primary">Continue →</button>
         <div id="onboard-status" class="onboard-status" role="status" aria-live="polite"></div>
       </form>

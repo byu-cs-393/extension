@@ -71,7 +71,13 @@ h1 {
 .onboard-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .onboard-form label {

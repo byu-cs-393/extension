@@ -118,63 +118,44 @@ body {
   margin-bottom: 24px;
 }
 
-/* Debug write panel */
-.debug-panel {
-  margin-top: 36px;
-  padding: 16px 18px;
+/* Profile dropdown */
+.profile-menu {
+  position: relative;
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 140px;
   background: var(--card-bg);
-  border: 1px dashed var(--text-tertiary);
-  border-radius: 8px;
-}
-
-.debug-panel h3 {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-tertiary);
-  margin: 0 0 12px 0;
-}
-
-.debug-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.debug-form label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.debug-form input {
-  padding: 7px 10px;
-  font-size: 13px;
-  font-family: inherit;
   border: 1px solid var(--divider);
   border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+  z-index: 10;
 }
 
-.debug-form input:focus {
-  outline: none;
-  border-color: var(--accent);
+.profile-dropdown[hidden] {
+  display: none;
 }
 
-.debug-status {
-  font-size: 12px;
-  color: var(--text-secondary);
-  min-height: 1em;
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.debug-status.success {
-  color: var(--success);
-}
-
-.debug-status.error {
-  color: #b91c1c;
+.dropdown-item:hover {
+  background: var(--hover-bg);
 }
 
 /* Week section */

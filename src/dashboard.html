@@ -19,7 +19,20 @@
         </div>
         <div class="actions">
           <button class="header-btn">🏆 Compete</button>
-          <button class="header-btn icon-only" title="Profile">👤</button>
+          <div class="profile-menu">
+            <button
+              class="header-btn icon-only"
+              id="profile-button"
+              title="Profile"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >👤</button>
+            <div class="profile-dropdown" id="profile-dropdown" role="menu" hidden>
+              <button type="button" class="dropdown-item" id="sign-out-btn" role="menuitem">
+                Sign out
+              </button>
+            </div>
+          </div>
           <button class="header-btn icon-only" title="Settings">⚙</button>
         </div>
       </header>
@@ -121,24 +134,6 @@
         </section>
 
         <div class="more-hint" aria-hidden="true">⋮ scroll for earlier weeks ⋮</div>
-
-        <section class="debug-panel">
-          <h3>Debug · write to Firestore</h3>
-          <form id="student-form" class="debug-form">
-            <label>
-              Name
-              <input type="text" id="input-name" placeholder="e.g. Jack" autocomplete="off" />
-            </label>
-            <label>
-              Note
-              <input type="text" id="input-note" placeholder="e.g. tired today" autocomplete="off" />
-            </label>
-            <div>
-              <button type="submit" class="btn-primary">Save to Firestore</button>
-            </div>
-            <div id="form-status" class="debug-status" role="status" aria-live="polite"></div>
-          </form>
-        </section>
       </main>
     </div>
 

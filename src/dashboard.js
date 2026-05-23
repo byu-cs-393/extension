@@ -1,64 +1,8 @@
-import { firebaseConfig } from "./firebase-config.js";
-
-const FIRESTORE_BASE =
-  `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
-  `/databases/(default)/documents`;
+import { fetchStudent } from "./firestore.js";
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
   return netID || null;
-}
-
-// Skipping the Firebase JS SDK for now — no bundler set up yet.
-async function fetchStudent(netID) {
-  const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Firestore returned ${response.status}: ${response.statusText}`);
-  }
-  const data = await response.json();
-  return parseFirestoreFields(data.fields);
-}
-
-// PATCH with updateMask only touches the listed fields, leaving the rest alone.
-async function updateStudent(netID, fields) {
-  const mask = Object.keys(fields)
-    .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
-    .join("&");
-  const url = `${FIRESTORE_BASE}/students/${netID}?${mask}&key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fields: encodeFirestoreFields(fields) }),
-  });
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Firestore PATCH ${response.status}: ${errorBody}`);
-  }
-  return response.json();
-}
-
-// Firestore REST wraps each field value in a type tag, e.g.
-//   { netID: { stringValue: "test123" } }
-// → { netID: "test123" }
-function parseFirestoreFields(fields) {
-  const result = {};
-  for (const [key, valueObj] of Object.entries(fields || {})) {
-    const type = Object.keys(valueObj)[0];
-    result[key] = valueObj[type];
-  }
-  return result;
-}
-
-function encodeFirestoreFields(obj) {
-  const result = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") result[key] = { stringValue: value };
-    else if (typeof value === "number") result[key] = { doubleValue: value };
-    else if (typeof value === "boolean") result[key] = { booleanValue: value };
-    else throw new Error(`Unsupported field type for ${key}: ${typeof value}`);
-  }
-  return result;
 }
 
 function renderStudent(student) {
@@ -71,53 +15,51 @@ async function loadAndRender(netID) {
     const student = await fetchStudent(netID);
     console.log("Loaded student from Firestore:", student);
     renderStudent(student);
-    document.getElementById("input-name").value = student?.name ?? "";
-    document.getElementById("input-note").value = student?.note ?? "";
   } catch (error) {
     console.error("Failed to load student:", error);
     document.getElementById("student-name").textContent = "friend";
   }
 }
 
-function wireForm(netID) {
-  const form = document.getElementById("student-form");
-  const status = document.getElementById("form-status");
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const name = document.getElementById("input-name").value.trim();
-    const note = document.getElementById("input-note").value.trim();
+function wireProfileMenu() {
+  const button = document.getElementById("profile-button");
+  const dropdown = document.getElementById("profile-dropdown");
+  const signOutBtn = document.getElementById("sign-out-btn");
 
-    const fields = {};
-    if (name) fields.name = name;
-    if (note) fields.note = note;
-    if (Object.keys(fields).length === 0) {
-      status.textContent = "Nothing to save — fill at least one field.";
-      status.className = "debug-status error";
-      return;
-    }
+  function close() {
+    dropdown.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
 
-    status.textContent = "Saving…";
-    status.className = "debug-status";
-    try {
-      await updateStudent(netID, fields);
-      status.textContent = "Saved.";
-      status.className = "debug-status success";
-      await loadAndRender(netID);
-    } catch (error) {
-      console.error(error);
-      status.textContent = `Failed: ${error.message}`;
-      status.className = "debug-status error";
-    }
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const wasHidden = dropdown.hidden;
+    dropdown.hidden = !wasHidden;
+    button.setAttribute("aria-expanded", String(wasHidden));
+  });
+
+  // Close on outside click.
+  document.addEventListener("click", (event) => {
+    if (!dropdown.hidden && !dropdown.contains(event.target)) close();
+  });
+
+  // Close on Escape.
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !dropdown.hidden) close();
+  });
+
+  signOutBtn.addEventListener("click", async () => {
+    await chrome.storage.sync.remove("netID");
+    window.location.href = chrome.runtime.getURL("onboard.html");
   });
 }
 
 (async () => {
   const netID = await getNetID();
   if (!netID) {
-    // No netID yet — punt to onboarding.
     window.location.href = chrome.runtime.getURL("onboard.html");
     return;
   }
   loadAndRender(netID);
-  wireForm(netID);
+  wireProfileMenu();
 })();
