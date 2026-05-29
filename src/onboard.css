@@ -50,12 +50,40 @@ body {
   color: var(--text-primary);
 }
 
-.step {
+/* Step indicator (top-right of the header) */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.step {
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--divider);
   color: var(--text-secondary);
+}
+
+.step.active {
+  border-color: var(--accent);
+  background: #eff6ff;
+  color: var(--accent);
+}
+
+.step.complete {
+  border-color: var(--success);
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.step-sep {
+  color: var(--text-tertiary);
 }
 
 h1 {
@@ -155,4 +183,80 @@ h1 {
   font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.5;
+}
+
+/* Step panels */
+.step-panel[hidden] {
+  display: none;
+}
+
+/* LeetCode-connect UI */
+.leetcode-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.leetcode-card {
+  width: 100%;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+}
+
+.leetcode-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.leetcode-card-username {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.leetcode-card-realname {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.leetcode-card-realname:empty {
+  display: none;
+}
+
+.step-nav {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Link-style button */
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-decoration-color: var(--divider);
+}
+
+.btn-link:hover {
+  color: var(--text-primary);
+}
+
+.btn-link.inline {
+  font-size: inherit;
+  padding: 0;
 }

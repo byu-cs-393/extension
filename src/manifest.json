@@ -9,12 +9,18 @@
   },
   "permissions": ["storage"],
   "host_permissions": [
-    "https://firestore.googleapis.com/*"
+    "https://firestore.googleapis.com/*",
+    "https://leetcode.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["leetcode-auth.js"],
+      "run_at": "document_idle"
+    },
     {
       "matches": ["https://leetcode.com/problems/*"],
       "js": ["leetcode-tracker.js"],

@@ -9,61 +9,107 @@
     <main class="onboard">
       <header class="onboard-header">
         <div class="brand">CS 393 Buddy</div>
-        <div class="step">Setup</div>
+        <ol class="step-indicator" aria-label="Setup progress">
+          <li class="step active" data-step="1">1 · BYU info</li>
+          <li class="step-sep" aria-hidden="true">·</li>
+          <li class="step" data-step="2">2 · LeetCode</li>
+        </ol>
       </header>
 
-      <h1>Welcome to CS 393 Buddy</h1>
-      <p class="lede">
-        Track your weekly LeetCode work, pass off topic exams with a TA, and stay synced with
-        Canvas.
-      </p>
+      <!-- Step 1: BYU info -->
+      <section class="step-panel" data-step="1">
+        <h1>Welcome to CS 393 Buddy</h1>
+        <p class="lede">
+          Track your weekly LeetCode work, pass off topic exams with a TA, and stay synced with
+          Canvas.
+        </p>
 
-      <form id="onboard-form" class="onboard-form">
-        <div class="field">
-          <label for="input-netid">
-            BYU netID
-            <span class="hint">e.g. <code>jdoe7</code></span>
-          </label>
-          <input
-            type="text"
-            id="input-netid"
-            name="netid"
-            autocomplete="username"
-            autocapitalize="off"
-            spellcheck="false"
-            required
-            placeholder="netID"
-          />
+        <form id="step1-form" class="onboard-form">
+          <div class="field">
+            <label for="input-netid">
+              BYU netID
+              <span class="hint">e.g. <code>jdoe7</code></span>
+            </label>
+            <input
+              type="text"
+              id="input-netid"
+              name="netid"
+              autocomplete="username"
+              autocapitalize="off"
+              spellcheck="false"
+              required
+              placeholder="netID"
+            />
+          </div>
+
+          <div class="field">
+            <label for="input-name">
+              Display name
+              <span class="hint">how the dashboard greets you</span>
+            </label>
+            <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
+          </div>
+
+          <div class="field">
+            <label for="input-note">
+              Status note
+              <span class="hint">optional</span>
+            </label>
+            <input
+              type="text"
+              id="input-note"
+              autocomplete="off"
+              placeholder="e.g. focused on hash maps this week"
+            />
+          </div>
+
+          <button type="submit" class="btn-primary">Continue →</button>
+          <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
+        </form>
+      </section>
+
+      <!-- Step 2: LeetCode -->
+      <section class="step-panel" data-step="2" hidden>
+        <h1>Connect LeetCode</h1>
+        <p class="lede">
+          We use your LeetCode account to track problems you've solved. Sign in to leetcode.com in
+          another tab — we'll detect your session automatically.
+        </p>
+
+        <!-- Signed-out: prompt the student to sign in. -->
+        <div id="leetcode-signed-out" class="leetcode-state">
+          <button type="button" class="btn-primary" id="open-leetcode-btn">
+            Open leetcode.com →
+          </button>
+          <p class="hint">
+            Already signed in? <button type="button" class="btn-link inline" id="recheck-btn">Re-check session</button>
+          </p>
         </div>
 
-        <div class="field">
-          <label for="input-name">
-            Display name
-            <span class="hint">how the dashboard greets you</span>
-          </label>
-          <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
+        <!-- Signed-in: confirm identity. -->
+        <div id="leetcode-signed-in" class="leetcode-state" hidden>
+          <div class="leetcode-card">
+            <div class="leetcode-card-label">Connected as</div>
+            <div class="leetcode-card-username" id="leetcode-username">@unknown</div>
+            <div class="leetcode-card-realname" id="leetcode-realname"></div>
+          </div>
+          <button type="button" class="btn-primary" id="confirm-leetcode-btn">
+            Yes, that's me →
+          </button>
+          <button type="button" class="btn-link" id="switch-account-btn">
+            Sign in with a different account
+          </button>
         </div>
 
-        <div class="field">
-          <label for="input-note">
-            Status note
-            <span class="hint">optional</span>
-          </label>
-          <input
-            type="text"
-            id="input-note"
-            autocomplete="off"
-            placeholder="e.g. focused on hash maps this week"
-          />
+        <div class="step-nav">
+          <button type="button" class="btn-link" id="back-to-step1">← Back</button>
+          <div id="step2-status" class="onboard-status" role="status" aria-live="polite"></div>
         </div>
-
-        <button type="submit" class="btn-primary">Continue →</button>
-        <div id="onboard-status" class="onboard-status" role="status" aria-live="polite"></div>
-      </form>
+      </section>
 
       <p class="footnote">
-        For now we just store your netID locally. The full setup (Canvas verification, LeetCode
-        link, privacy disclosure) is coming.
+        For now we store identity locally and in Firestore. Canvas verification + privacy
+        disclosure will be added in a later pass.
       </p>
     </main>
 
