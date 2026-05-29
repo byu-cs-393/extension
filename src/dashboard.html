@@ -53,16 +53,22 @@
           <article class="card">
             <div class="card-title">Recommended problems</div>
             <div class="progress">
-              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="3">
-                <div class="progress-fill" style="width: 25%;"></div>
+              <div
+                class="progress-bar"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="7"
+                aria-valuenow="0"
+                id="recommended-bar"
+              >
+                <div class="progress-fill" id="recommended-fill" style="width: 0%;"></div>
               </div>
-              <div class="progress-text">3 / 12</div>
+              <div class="progress-text" id="recommended-text">— / 7</div>
             </div>
-            <div class="card-detail">Currently on: Two Sum II</div>
-            <div class="card-actions">
-              <button class="btn-primary">Next problem →</button>
-              <button class="btn-link">Show all ▼</button>
-            </div>
+            <ul class="card-list problem-list" id="recommended-list">
+              <li class="problem-empty">Visit a leetcode.com page to sync progress.</li>
+            </ul>
+            <div class="card-meta" id="recommended-meta"></div>
           </article>
 
           <article class="card">

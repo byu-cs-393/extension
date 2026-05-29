@@ -358,6 +358,87 @@ body {
   color: var(--text-primary);
 }
 
+/* Problem list (real LeetCode data) */
+.problem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px 0;
+}
+
+.problem {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.problem-mark {
+  text-align: center;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+
+.problem.complete .problem-mark {
+  color: var(--success);
+}
+
+.problem-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.problem.complete .problem-link {
+  color: var(--text-primary);
+}
+
+.problem-link:hover {
+  text-decoration: underline;
+}
+
+.problem-diff {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.problem-diff.diff-easy {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.problem-diff.diff-medium {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.problem-diff.diff-hard {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.problem-empty {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.card-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.card-meta:empty {
+  display: none;
+}
+
 /* Scroll-for-more hint */
 .more-hint {
   text-align: center;
