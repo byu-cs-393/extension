@@ -359,11 +359,48 @@ body {
 }
 
 /* Problem list (real LeetCode data) */
+.problem-details {
+  margin-bottom: 8px;
+}
+
+.problem-details[hidden] {
+  display: none;
+}
+
+.problem-details-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  list-style: none;
+  user-select: none;
+}
+
+.problem-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.problem-details-summary:hover {
+  color: var(--text-primary);
+}
+
+.problem-details-summary .chevron {
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.problem-details[open] .problem-details-summary .chevron {
+  transform: rotate(180deg);
+}
+
 .problem-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 0 0 12px 0;
+  margin: 6px 0 4px 0;
 }
 
 .problem {

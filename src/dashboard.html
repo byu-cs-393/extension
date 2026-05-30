@@ -65,10 +65,16 @@
               </div>
               <div class="progress-text" id="recommended-text">— / 7</div>
             </div>
-            <ul class="card-list problem-list" id="recommended-list">
-              <li class="problem-empty">Visit a leetcode.com page to sync progress.</li>
-            </ul>
-            <div class="card-meta" id="recommended-meta"></div>
+            <details class="problem-details" id="recommended-details" hidden>
+              <summary class="problem-details-summary">
+                <span>Show problems</span>
+                <span class="chevron" aria-hidden="true">▾</span>
+              </summary>
+              <ul class="card-list problem-list" id="recommended-list"></ul>
+            </details>
+            <div class="card-meta" id="recommended-meta">
+              Visit a leetcode.com page to sync progress.
+            </div>
           </article>
 
           <article class="card">

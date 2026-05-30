@@ -49,15 +49,18 @@ function renderRecommendedProgress(data) {
   const text = document.getElementById("recommended-text");
   const bar = document.getElementById("recommended-bar");
   const meta = document.getElementById("recommended-meta");
+  const details = document.getElementById("recommended-details");
 
   if (!data?.problems?.length) {
-    list.innerHTML = '<li class="problem-empty">Visit a leetcode.com page to sync progress.</li>';
+    details.hidden = true;
+    list.innerHTML = "";
     fill.style.width = "0%";
     fill.className = "progress-fill";
     text.textContent = "— / 7";
-    meta.textContent = "";
+    meta.textContent = "Visit a leetcode.com page to sync progress.";
     return;
   }
+  details.hidden = false;
 
   const problems = data.problems;
   const solved = problems.filter((p) => p.status === "ac").length;
