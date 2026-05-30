@@ -118,6 +118,30 @@ async function logVerdict(slug, verdict) {
   } catch (error) {
     console.error("[CS 393 Buddy] failed to log verdict:", error);
   }
+  if (eventType === "submit_pass") {
+    await markRecommendedSolved(slug);
+  }
+}
+
+// Optimistic dashboard update: if the just-solved problem is in the
+// cached recommended-progress list, flip its status to "ac" locally so
+// the dashboard reflects the win immediately, without waiting for the
+// next GraphQL resync.
+async function markRecommendedSolved(slug) {
+  try {
+    const { recommendedProgress } = await chrome.storage.local.get("recommendedProgress");
+    const problems = recommendedProgress?.problems;
+    if (!problems?.some((p) => p.titleSlug === slug && p.status !== "ac")) return;
+    const updated = problems.map((p) =>
+      p.titleSlug === slug ? { ...p, status: "ac" } : p
+    );
+    await chrome.storage.local.set({
+      recommendedProgress: { ...recommendedProgress, problems: updated, syncedAt: Date.now() },
+    });
+    console.log(`[CS 393 Buddy] marked ${slug} as solved in recommended list`);
+  } catch (error) {
+    console.error("[CS 393 Buddy] failed to update recommended progress:", error);
+  }
 }
 
 // ---- verdict detection --------------------------------------------------

@@ -25,10 +25,14 @@ const RECOMMENDED_PROBLEMS = [
   "sum-of-distances",
 ];
 
-// Re-sync the recommended-problem statuses at most this often. Cheap
-// enough that we could refetch every page load, but throttling keeps
-// LeetCode happy on heavy browsing sessions.
-const RECOMMENDED_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+// Re-sync the recommended-problem statuses at most this often. Short
+// enough that "I just solved one, let me check the dashboard" feels
+// fresh; long enough that hammering refresh on leetcode.com doesn't
+// fire 7 GraphQL calls per click. The leetcode-tracker.js submit_pass
+// handler also optimistically updates this same key without a refetch,
+// so the throttle mostly bounds the *catch-up* sync, not the
+// just-solved case.
+const RECOMMENDED_SYNC_INTERVAL_MS = 30 * 1000;
 
 const USER_STATUS_QUERY = {
   operationName: "globalData",
