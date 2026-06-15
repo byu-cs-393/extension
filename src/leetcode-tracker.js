@@ -146,13 +146,32 @@ async function markRecommendedSolved(slug) {
 
 // ---- verdict detection --------------------------------------------------
 
+// A real submission result panel always renders companion stats like
+// "Runtime: 53 ms" or "Memory: 14.2 MB" near the verdict. Status badges
+// for previously-solved problems and filter-dropdown UI ("Filter:
+// Accepted") don't. We use this to distinguish a fresh submission
+// verdict from incidental "Accepted" text elsewhere on the page.
+const RESULT_PANEL_KEYWORDS = /\b(Runtime|Memory|Submission Detail)\b/i;
+const ANCESTOR_SEARCH_DEPTH = 6;
+
 // Walk visible spans/divs looking for an element whose trimmed text is
-// exactly one of our known verdicts. Returns the verdict string or null.
+// exactly one of our known verdicts AND whose ancestor chain contains
+// submission-result keywords. Returns the verdict string or null.
 function findVerdictInDOM() {
   const candidates = document.querySelectorAll("span, div");
   for (const el of candidates) {
     const text = el.textContent?.trim();
-    if (text && VERDICTS[text]) return text;
+    if (!text || !VERDICTS[text]) continue;
+
+    let parent = el.parentElement;
+    let depth = 0;
+    while (parent && depth < ANCESTOR_SEARCH_DEPTH) {
+      if (RESULT_PANEL_KEYWORDS.test(parent.textContent || "")) {
+        return text;
+      }
+      parent = parent.parentElement;
+      depth++;
+    }
   }
   return null;
 }
