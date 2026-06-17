@@ -15,18 +15,25 @@
     </header>
 
     <section class="week">
-      <div class="week-label">Week 6</div>
+      <div class="week-label" id="popup-week-label">This week</div>
 
       <article class="card">
         <div class="card-title">Recommended problems</div>
         <div class="progress">
-          <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="12" aria-valuenow="3">
-            <div class="progress-fill"></div>
+          <div
+            class="progress-bar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="7"
+            aria-valuenow="0"
+            id="popup-progress-bar"
+          >
+            <div class="progress-fill" id="popup-progress-fill"></div>
           </div>
-          <div class="progress-text">3 / 12</div>
+          <div class="progress-text" id="popup-progress-text">— / 7</div>
         </div>
-        <div class="card-detail">Currently on: Two Sum II</div>
-        <button type="button" class="btn-primary">Next problem →</button>
+        <div class="card-detail" id="popup-detail">Visit leetcode.com to sync progress.</div>
+        <button type="button" class="btn-primary" id="popup-next-btn" hidden>Next problem →</button>
       </article>
 
       <article class="card">
@@ -51,6 +58,6 @@
       <a href="#" role="button">🏆 Compete</a>
     </footer>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
   </body>
 </html>

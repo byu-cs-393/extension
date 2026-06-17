@@ -1,21 +1,10 @@
 import { fetchStudent } from "./firestore.js";
-
-// Recommended-problem catalog. Titles + difficulties hardcoded since we
-// no longer fetch them from LeetCode — "solved" is now driven by
-// student.solvedProblems in Firestore (populated by the LeetCode
-// tracker on real submit_pass events).
-//
-// Difficulties are best-guess; double-check on LeetCode if it matters.
-// Eventually this list will come from per-class Firestore config.
-const RECOMMENDED_PROBLEMS = [
-  { slug: "min-cost-climbing-stairs", title: "Min Cost Climbing Stairs", difficulty: "Easy" },
-  { slug: "climbing-stairs", title: "Climbing Stairs", difficulty: "Easy" },
-  { slug: "coin-change", title: "Coin Change", difficulty: "Medium" },
-  { slug: "coin-change-ii", title: "Coin Change II", difficulty: "Medium" },
-  { slug: "range-sum-query-immutable", title: "Range Sum Query - Immutable", difficulty: "Easy" },
-  { slug: "range-sum-query-2d-immutable", title: "Range Sum Query 2D - Immutable", difficulty: "Medium" },
-  { slug: "sum-of-distances", title: "Sum of Distances", difficulty: "Hard" },
-];
+import {
+  RECOMMENDED_PROBLEMS,
+  getCurrentWeekStart,
+  getCurrentWeekEnd,
+  solvedSlugsThisWeek,
+} from "./recommended.js";
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -60,21 +49,6 @@ function formatRelativeTime(timestamp) {
   return RELATIVE_TIME_FORMATTER.format(Math.round(seconds / 604800), "week");
 }
 
-// Monday 00:00 (local time) of the current week, in epoch ms.
-function getCurrentWeekStart() {
-  const now = new Date();
-  const dow = now.getDay(); // 0 = Sunday, 1 = Monday, ...
-  const daysFromMonday = (dow + 6) % 7;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - daysFromMonday);
-  monday.setHours(0, 0, 0, 0);
-  return monday.getTime();
-}
-
-function getCurrentWeekEnd() {
-  return getCurrentWeekStart() + 7 * 24 * 60 * 60 * 1000;
-}
-
 const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
 function renderWeekHeader() {
@@ -95,14 +69,7 @@ function renderRecommendedProgress(cached) {
 
   // Only solves whose timestamp falls inside this week's window count
   // for this week's recommended set.
-  const weekStart = getCurrentWeekStart();
-  const weekEnd = getCurrentWeekEnd();
-  const solves = cached?.solves ?? {};
-  const solvedSet = new Set(
-    Object.entries(solves)
-      .filter(([, ts]) => ts >= weekStart && ts < weekEnd)
-      .map(([slug]) => slug)
-  );
+  const solvedSet = solvedSlugsThisWeek(cached);
 
   const total = RECOMMENDED_PROBLEMS.length;
   const solved = RECOMMENDED_PROBLEMS.filter((p) => solvedSet.has(p.slug)).length;
