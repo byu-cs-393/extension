@@ -60,6 +60,31 @@ function formatRelativeTime(timestamp) {
   return RELATIVE_TIME_FORMATTER.format(Math.round(seconds / 604800), "week");
 }
 
+// Monday 00:00 (local time) of the current week, in epoch ms.
+function getCurrentWeekStart() {
+  const now = new Date();
+  const dow = now.getDay(); // 0 = Sunday, 1 = Monday, ...
+  const daysFromMonday = (dow + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysFromMonday);
+  monday.setHours(0, 0, 0, 0);
+  return monday.getTime();
+}
+
+function getCurrentWeekEnd() {
+  return getCurrentWeekStart() + 7 * 24 * 60 * 60 * 1000;
+}
+
+const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
+
+function renderWeekHeader() {
+  const dates = document.getElementById("week-dates");
+  if (!dates) return;
+  const start = new Date(getCurrentWeekStart());
+  const end = new Date(getCurrentWeekEnd() - 1); // inclusive Sunday
+  dates.textContent = `${SHORT_DATE.format(start)} – ${SHORT_DATE.format(end)}`;
+}
+
 function renderRecommendedProgress(cached) {
   const list = document.getElementById("recommended-list");
   const fill = document.getElementById("recommended-fill");
@@ -68,7 +93,17 @@ function renderRecommendedProgress(cached) {
   const meta = document.getElementById("recommended-meta");
   const details = document.getElementById("recommended-details");
 
-  const solvedSet = new Set(cached?.slugs ?? []);
+  // Only solves whose timestamp falls inside this week's window count
+  // for this week's recommended set.
+  const weekStart = getCurrentWeekStart();
+  const weekEnd = getCurrentWeekEnd();
+  const solves = cached?.solves ?? {};
+  const solvedSet = new Set(
+    Object.entries(solves)
+      .filter(([, ts]) => ts >= weekStart && ts < weekEnd)
+      .map(([slug]) => slug)
+  );
+
   const total = RECOMMENDED_PROBLEMS.length;
   const solved = RECOMMENDED_PROBLEMS.filter((p) => solvedSet.has(p.slug)).length;
   const pct = Math.round((solved / total) * 100);
@@ -124,9 +159,13 @@ async function initRecommendedProgress(netID) {
 
   try {
     const student = await fetchStudent(netID);
-    const slugs = Array.isArray(student?.solvedProblems) ? student.solvedProblems : [];
+    const raw = student?.solvedProblems;
+    // New shape: map of slug → timestampMs. Legacy arrays from older
+    // schema versions are ignored — the backstop will repopulate from
+    // recent ACs.
+    const solves = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     await chrome.storage.local.set({
-      solvedProblems: { slugs, syncedAt: Date.now() },
+      solvedProblems: { solves, syncedAt: Date.now() },
     });
   } catch (error) {
     console.error("Failed to fetch solved problems from Firestore:", error);
@@ -182,5 +221,6 @@ function wireProfileMenu() {
   }
   loadAndRender(netID);
   wireProfileMenu();
+  renderWeekHeader();
   initRecommendedProgress(netID);
 })();

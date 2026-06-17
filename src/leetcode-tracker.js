@@ -127,52 +127,66 @@ async function logVerdict(slug, verdict) {
 //   1. chrome.storage.local — instant cache update so the dashboard's
 //      onChanged listener re-renders within a second, no network wait.
 //   2. Firestore students/{netID}.solvedProblems — source of truth.
-//      Append-if-missing semantics via read-modify-write.
+//      Append-if-missing semantics via read-modify-write of the map.
 // Cache update first so the user sees the win immediately even if the
 // Firestore call is slow or fails.
 async function markSolved(slug) {
+  const solvedAt = Date.now();
   try {
     const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
-    const slugs = new Set(solvedProblems?.slugs ?? []);
-    if (!slugs.has(slug)) {
-      slugs.add(slug);
-      await chrome.storage.local.set({
-        solvedProblems: { slugs: Array.from(slugs), syncedAt: Date.now() },
-      });
-    }
+    const solves = { ...(solvedProblems?.solves ?? {}) };
+    if (solves[slug]) return;
+    solves[slug] = solvedAt;
+    await chrome.storage.local.set({
+      solvedProblems: { solves, syncedAt: Date.now() },
+    });
   } catch (error) {
     console.error("[CS 393 Buddy] failed to update solved cache:", error);
   }
 
   try {
     const existing = await fetchSolvedProblemsFromFirestore(netID);
-    if (existing.includes(slug)) return;
-    await writeSolvedProblemsToFirestore(netID, [...existing, slug]);
+    if (slug in existing) return;
+    const updated = { ...existing, [slug]: solvedAt };
+    await writeSolvedProblemsToFirestore(netID, updated);
     console.log(`[CS 393 Buddy] persisted solved: ${slug}`);
   } catch (error) {
     console.error("[CS 393 Buddy] failed to persist solved to Firestore:", error);
   }
 }
 
+// Returns a map of { slug: timestampMs }. Tolerates 404 (no student doc
+// yet) and legacy array shape from the previous schema.
 async function fetchSolvedProblemsFromFirestore(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url);
-  if (response.status === 404) return [];
+  if (response.status === 404) return {};
   if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
   const data = await response.json();
-  const values = data.fields?.solvedProblems?.arrayValue?.values ?? [];
-  return values.map((v) => v.stringValue).filter(Boolean);
+  const field = data.fields?.solvedProblems;
+  if (!field) return {};
+  if (field.mapValue) {
+    const out = {};
+    for (const [slug, valueObj] of Object.entries(field.mapValue.fields ?? {})) {
+      const ts = Number(valueObj.doubleValue ?? valueObj.integerValue ?? 0);
+      if (slug && ts) out[slug] = ts;
+    }
+    return out;
+  }
+  return {};
 }
 
-async function writeSolvedProblemsToFirestore(netID, slugs) {
+async function writeSolvedProblemsToFirestore(netID, solves) {
   const url =
     `${FIRESTORE_BASE}/students/${netID}` +
     `?updateMask.fieldPaths=solvedProblems&key=${firebaseConfig.apiKey}`;
+  const mapFields = {};
+  for (const [slug, ts] of Object.entries(solves)) {
+    mapFields[slug] = { doubleValue: ts };
+  }
   const body = {
     fields: {
-      solvedProblems: {
-        arrayValue: { values: slugs.map((s) => ({ stringValue: s })) },
-      },
+      solvedProblems: { mapValue: { fields: mapFields } },
     },
   };
   const response = await fetch(url, {

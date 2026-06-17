@@ -67,10 +67,21 @@ function unwrapFirestoreValue(valueObj) {
 function encodeFirestoreFields(obj) {
   const result = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") result[key] = { stringValue: value };
-    else if (typeof value === "number") result[key] = { doubleValue: value };
-    else if (typeof value === "boolean") result[key] = { booleanValue: value };
-    else throw new Error(`Unsupported field type for ${key}: ${typeof value}`);
+    result[key] = encodeFirestoreValue(value);
   }
   return result;
+}
+
+function encodeFirestoreValue(value) {
+  if (typeof value === "string") return { stringValue: value };
+  if (typeof value === "number") return { doubleValue: value };
+  if (typeof value === "boolean") return { booleanValue: value };
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
+  if (Array.isArray(value)) {
+    return { arrayValue: { values: value.map(encodeFirestoreValue) } };
+  }
+  if (typeof value === "object" && value !== null) {
+    return { mapValue: { fields: encodeFirestoreFields(value) } };
+  }
+  throw new Error(`Unsupported field value type: ${typeof value}`);
 }
