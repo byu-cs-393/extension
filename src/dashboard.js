@@ -1,5 +1,22 @@
 import { fetchStudent } from "./firestore.js";
 
+// Recommended-problem catalog. Titles + difficulties hardcoded since we
+// no longer fetch them from LeetCode — "solved" is now driven by
+// student.solvedProblems in Firestore (populated by the LeetCode
+// tracker on real submit_pass events).
+//
+// Difficulties are best-guess; double-check on LeetCode if it matters.
+// Eventually this list will come from per-class Firestore config.
+const RECOMMENDED_PROBLEMS = [
+  { slug: "min-cost-climbing-stairs", title: "Min Cost Climbing Stairs", difficulty: "Easy" },
+  { slug: "climbing-stairs", title: "Climbing Stairs", difficulty: "Easy" },
+  { slug: "coin-change", title: "Coin Change", difficulty: "Medium" },
+  { slug: "coin-change-ii", title: "Coin Change II", difficulty: "Medium" },
+  { slug: "range-sum-query-immutable", title: "Range Sum Query - Immutable", difficulty: "Easy" },
+  { slug: "range-sum-query-2d-immutable", title: "Range Sum Query 2D - Immutable", difficulty: "Medium" },
+  { slug: "sum-of-distances", title: "Sum of Distances", difficulty: "Hard" },
+];
+
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
   return netID || null;
@@ -43,7 +60,7 @@ function formatRelativeTime(timestamp) {
   return RELATIVE_TIME_FORMATTER.format(Math.round(seconds / 604800), "week");
 }
 
-function renderRecommendedProgress(data) {
+function renderRecommendedProgress(cached) {
   const list = document.getElementById("recommended-list");
   const fill = document.getElementById("recommended-fill");
   const text = document.getElementById("recommended-text");
@@ -51,22 +68,12 @@ function renderRecommendedProgress(data) {
   const meta = document.getElementById("recommended-meta");
   const details = document.getElementById("recommended-details");
 
-  if (!data?.problems?.length) {
-    details.hidden = true;
-    list.innerHTML = "";
-    fill.style.width = "0%";
-    fill.className = "progress-fill";
-    text.textContent = "— / 7";
-    meta.textContent = "Visit a leetcode.com page to sync progress.";
-    return;
-  }
-  details.hidden = false;
-
-  const problems = data.problems;
-  const solved = problems.filter((p) => p.status === "ac").length;
-  const total = problems.length;
+  const solvedSet = new Set(cached?.slugs ?? []);
+  const total = RECOMMENDED_PROBLEMS.length;
+  const solved = RECOMMENDED_PROBLEMS.filter((p) => solvedSet.has(p.slug)).length;
   const pct = Math.round((solved / total) * 100);
 
+  details.hidden = false;
   text.textContent = `${solved} / ${total}`;
   fill.style.width = `${pct}%`;
   fill.className = solved === total ? "progress-fill complete" : "progress-fill";
@@ -74,17 +81,18 @@ function renderRecommendedProgress(data) {
   bar.setAttribute("aria-valuemax", String(total));
 
   list.innerHTML = "";
-  for (const p of problems) {
+  for (const p of RECOMMENDED_PROBLEMS) {
+    const isSolved = solvedSet.has(p.slug);
     const li = document.createElement("li");
-    li.className = `problem ${p.status === "ac" ? "complete" : "pending"}`;
+    li.className = `problem ${isSolved ? "complete" : "pending"}`;
 
     const mark = document.createElement("span");
     mark.className = "problem-mark";
-    mark.textContent = p.status === "ac" ? "✓" : "○";
+    mark.textContent = isSolved ? "✓" : "○";
 
     const link = document.createElement("a");
     link.className = "problem-link";
-    link.href = `https://leetcode.com/problems/${p.titleSlug}/`;
+    link.href = `https://leetcode.com/problems/${p.slug}/`;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = p.title;
@@ -101,17 +109,33 @@ function renderRecommendedProgress(data) {
     list.appendChild(li);
   }
 
-  meta.textContent = data.syncedAt ? `Synced ${formatRelativeTime(data.syncedAt)}` : "";
+  meta.textContent = cached?.syncedAt
+    ? `Synced ${formatRelativeTime(cached.syncedAt)}`
+    : "Solve a problem on LeetCode to register progress.";
 }
 
-async function initRecommendedProgress() {
-  const { recommendedProgress } = await chrome.storage.local.get("recommendedProgress");
-  renderRecommendedProgress(recommendedProgress);
+// Two-phase load: render from local cache instantly, then fetch
+// authoritative state from Firestore in the background and overwrite
+// the cache. The onChanged listener picks up the new value and
+// re-renders.
+async function initRecommendedProgress(netID) {
+  const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
+  renderRecommendedProgress(solvedProblems);
+
+  try {
+    const student = await fetchStudent(netID);
+    const slugs = Array.isArray(student?.solvedProblems) ? student.solvedProblems : [];
+    await chrome.storage.local.set({
+      solvedProblems: { slugs, syncedAt: Date.now() },
+    });
+  } catch (error) {
+    console.error("Failed to fetch solved problems from Firestore:", error);
+  }
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.recommendedProgress) {
-    renderRecommendedProgress(changes.recommendedProgress.newValue);
+  if (areaName === "local" && changes.solvedProblems) {
+    renderRecommendedProgress(changes.solvedProblems.newValue);
   }
 });
 
@@ -158,5 +182,5 @@ function wireProfileMenu() {
   }
   loadAndRender(netID);
   wireProfileMenu();
-  initRecommendedProgress();
+  initRecommendedProgress(netID);
 })();

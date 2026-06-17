@@ -42,13 +42,26 @@ export async function updateStudent(netID, fields) {
 // Firestore REST wraps each field value in a type tag, e.g.
 //   { name: { stringValue: "Jack" } }
 // → { name: "Jack" }
+// Arrays are nested: arrayValue.values is itself a list of type-tagged
+// values, which we unwrap recursively.
 function parseFirestoreFields(fields) {
   const result = {};
   for (const [key, valueObj] of Object.entries(fields || {})) {
-    const type = Object.keys(valueObj)[0];
-    result[key] = valueObj[type];
+    result[key] = unwrapFirestoreValue(valueObj);
   }
   return result;
+}
+
+function unwrapFirestoreValue(valueObj) {
+  const type = Object.keys(valueObj)[0];
+  const value = valueObj[type];
+  if (type === "arrayValue") {
+    return (value.values ?? []).map(unwrapFirestoreValue);
+  }
+  if (type === "mapValue") {
+    return parseFirestoreFields(value.fields);
+  }
+  return value;
 }
 
 function encodeFirestoreFields(obj) {

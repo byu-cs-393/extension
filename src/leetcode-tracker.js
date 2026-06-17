@@ -119,29 +119,72 @@ async function logVerdict(slug, verdict) {
     console.error("[CS 393 Buddy] failed to log verdict:", error);
   }
   if (eventType === "submit_pass") {
-    await markRecommendedSolved(slug);
+    await markSolved(slug);
   }
 }
 
-// Optimistic dashboard update: if the just-solved problem is in the
-// cached recommended-progress list, flip its status to "ac" locally so
-// the dashboard reflects the win immediately, without waiting for the
-// next GraphQL resync.
-async function markRecommendedSolved(slug) {
+// Mark a problem as solved-during-class. Two writes:
+//   1. chrome.storage.local — instant cache update so the dashboard's
+//      onChanged listener re-renders within a second, no network wait.
+//   2. Firestore students/{netID}.solvedProblems — source of truth.
+//      Append-if-missing semantics via read-modify-write.
+// Cache update first so the user sees the win immediately even if the
+// Firestore call is slow or fails.
+async function markSolved(slug) {
   try {
-    const { recommendedProgress } = await chrome.storage.local.get("recommendedProgress");
-    const problems = recommendedProgress?.problems;
-    if (!problems?.some((p) => p.titleSlug === slug && p.status !== "ac")) return;
-    const updated = problems.map((p) =>
-      p.titleSlug === slug ? { ...p, status: "ac" } : p
-    );
-    await chrome.storage.local.set({
-      recommendedProgress: { ...recommendedProgress, problems: updated, syncedAt: Date.now() },
-    });
-    console.log(`[CS 393 Buddy] marked ${slug} as solved in recommended list`);
+    const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
+    const slugs = new Set(solvedProblems?.slugs ?? []);
+    if (!slugs.has(slug)) {
+      slugs.add(slug);
+      await chrome.storage.local.set({
+        solvedProblems: { slugs: Array.from(slugs), syncedAt: Date.now() },
+      });
+    }
   } catch (error) {
-    console.error("[CS 393 Buddy] failed to update recommended progress:", error);
+    console.error("[CS 393 Buddy] failed to update solved cache:", error);
   }
+
+  try {
+    const existing = await fetchSolvedProblemsFromFirestore(netID);
+    if (existing.includes(slug)) return;
+    await writeSolvedProblemsToFirestore(netID, [...existing, slug]);
+    console.log(`[CS 393 Buddy] persisted solved: ${slug}`);
+  } catch (error) {
+    console.error("[CS 393 Buddy] failed to persist solved to Firestore:", error);
+  }
+}
+
+async function fetchSolvedProblemsFromFirestore(netID) {
+  const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
+  const response = await fetch(url);
+  if (response.status === 404) return [];
+  if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
+  const data = await response.json();
+  const values = data.fields?.solvedProblems?.arrayValue?.values ?? [];
+  return values.map((v) => v.stringValue).filter(Boolean);
+}
+
+async function writeSolvedProblemsToFirestore(netID, slugs) {
+  const url =
+    `${FIRESTORE_BASE}/students/${netID}` +
+    `?updateMask.fieldPaths=solvedProblems&key=${firebaseConfig.apiKey}`;
+  const body = {
+    fields: {
+      solvedProblems: {
+        arrayValue: { values: slugs.map((s) => ({ stringValue: s })) },
+      },
+    },
+  };
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Firestore PATCH ${response.status}: ${errorBody}`);
+  }
+  return response.json();
 }
 
 // ---- verdict detection --------------------------------------------------
