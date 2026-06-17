@@ -189,12 +189,14 @@ async function writeSolvedProblemsToFirestore(netID, slugs) {
 
 // ---- verdict detection --------------------------------------------------
 
-// A real submission result panel always renders companion stats like
-// "Runtime: 53 ms" or "Memory: 14.2 MB" near the verdict. Status badges
-// for previously-solved problems and filter-dropdown UI ("Filter:
-// Accepted") don't. We use this to distinguish a fresh submission
-// verdict from incidental "Accepted" text elsewhere on the page.
-const RESULT_PANEL_KEYWORDS = /\b(Runtime|Memory|Submission Detail)\b/i;
+// A real submission result panel always renders companion text like
+// "testcases passed" and "submitted at" that doesn't appear in status
+// badges, tab labels, or the "X/Y solved" stats UI. The Runtime/Memory
+// labels run on without spaces in LeetCode's React output (e.g.
+// "Runtime0msBeats100.00%Memory") so we match those by label-then-digit
+// rather than relying on word boundaries.
+const RESULT_PANEL_KEYWORDS =
+  /(testcases passed|submitted at|Submission Detail|Runtime\s*\d|Memory\s*\d)/i;
 const ANCESTOR_SEARCH_DEPTH = 6;
 
 // Walk visible spans/divs looking for an element whose trimmed text is
