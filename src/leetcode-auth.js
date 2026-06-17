@@ -1,3 +1,13 @@
+// Wrapped in an IIFE so our top-level `const`s (firebaseConfig,
+// FIRESTORE_BASE, etc.) stay scope-local. Without this, when both
+// leetcode-auth.js and leetcode-tracker.js inject on the same /problems/
+// page, they'd collide at the second redeclaration — content scripts of
+// the same extension share an isolated world per tab — and the
+// second-loaded file would silently fail with a SyntaxError, taking
+// open_problem and submit_pass logging down with it.
+(() => {
+"use strict";
+
 // Content script that runs on every leetcode.com page. Two jobs:
 //
 //   1. Auth check — call userStatus GraphQL (cookies attach automatically
@@ -150,30 +160,33 @@ async function runBackstop(username) {
   const cachedSolves = cacheBundle?.solvedProblems?.solves ?? {};
 
   // Start from Firestore + cache. Cache wins for any overlap since it
-  // reflects the most recent tracker-recorded timestamp (which beats
-  // LeetCode's reported submit time on the same slug).
+  // reflects the most recent tracker-recorded timestamp.
   const merged = { ...firestoreSolves, ...cachedSolves };
-  let added = 0;
+  let updated = 0;
   for (const { slug, timestampMs } of recent) {
-    if (!(slug in merged)) {
+    // Take the max: if the tracker already recorded a more recent
+    // solve, don't downgrade. If LeetCode reports a newer one (a fresh
+    // submission the tracker missed), bump up.
+    const previous = merged[slug] ?? 0;
+    if (timestampMs > previous) {
       merged[slug] = timestampMs;
-      added++;
+      updated++;
     }
   }
 
-  // Anything to push? Either new slugs from recent ACs, or cached
+  // Anything to push? Either updated timestamps, new slugs, or cached
   // entries the tracker didn't manage to persist.
   const hasUnpushedFromCache = Object.keys(cachedSolves).some(
-    (slug) => !(slug in firestoreSolves)
+    (slug) => !(slug in firestoreSolves) || cachedSolves[slug] > (firestoreSolves[slug] ?? 0)
   );
   console.log(
     `[CS 393 Buddy] backstop: Firestore had ${Object.keys(firestoreSolves).length}, ` +
-      `cache had ${Object.keys(cachedSolves).length}, ${added} new from recent ACs, ` +
+      `cache had ${Object.keys(cachedSolves).length}, ${updated} updated from recent ACs, ` +
       `unpushed cache=${hasUnpushedFromCache}`
   );
-  if (added === 0 && !hasUnpushedFromCache) return;
+  if (updated === 0 && !hasUnpushedFromCache) return;
 
-  if (added > 0) console.log(`[CS 393 Buddy] backstop adding ${added} solve(s) from recent ACs`);
+  if (updated > 0) console.log(`[CS 393 Buddy] backstop updating ${updated} solve(s) from recent ACs`);
   if (hasUnpushedFromCache) console.log(`[CS 393 Buddy] backstop reconciling cached solves to Firestore`);
 
   // Cache write first (fast UI), then Firestore (truth).
@@ -223,4 +236,6 @@ async function runBackstop(username) {
   } catch (error) {
     console.error("[CS 393 Buddy] backstop sync failed:", error);
   }
+})();
+
 })();

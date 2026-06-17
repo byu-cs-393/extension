@@ -135,7 +135,9 @@ async function markSolved(slug) {
   try {
     const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
     const solves = { ...(solvedProblems?.solves ?? {}) };
-    if (solves[slug]) return;
+    // Always overwrite with the new timestamp — a fresh accepted
+    // submission for a previously-solved problem still counts for
+    // whatever week it lands in.
     solves[slug] = solvedAt;
     await chrome.storage.local.set({
       solvedProblems: { solves, syncedAt: Date.now() },
@@ -146,10 +148,9 @@ async function markSolved(slug) {
 
   try {
     const existing = await fetchSolvedProblemsFromFirestore(netID);
-    if (slug in existing) return;
     const updated = { ...existing, [slug]: solvedAt };
     await writeSolvedProblemsToFirestore(netID, updated);
-    console.log(`[CS 393 Buddy] persisted solved: ${slug}`);
+    console.log(`[CS 393 Buddy] persisted solved: ${slug} @ ${new Date(solvedAt).toISOString()}`);
   } catch (error) {
     console.error("[CS 393 Buddy] failed to persist solved to Firestore:", error);
   }
