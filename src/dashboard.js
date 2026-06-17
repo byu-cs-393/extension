@@ -1,10 +1,16 @@
 import { fetchStudent } from "./firestore.js";
 import {
-  RECOMMENDED_PROBLEMS,
+  getRecommendedProblems,
+  refreshRecommendedProblems,
   getCurrentWeekStart,
   getCurrentWeekEnd,
   solvedSlugsThisWeek,
 } from "./recommended.js";
+
+// Module-scoped state — render() reads from these. Two paths update
+// them: chrome.storage.onChanged (live), or the bootstrap (initial).
+let currentCatalog = [];
+let currentSolves = null;
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -59,7 +65,7 @@ function renderWeekHeader() {
   dates.textContent = `${SHORT_DATE.format(start)} – ${SHORT_DATE.format(end)}`;
 }
 
-function renderRecommendedProgress(cached) {
+function renderRecommendedProgress() {
   const list = document.getElementById("recommended-list");
   const fill = document.getElementById("recommended-fill");
   const text = document.getElementById("recommended-text");
@@ -69,21 +75,21 @@ function renderRecommendedProgress(cached) {
 
   // Only solves whose timestamp falls inside this week's window count
   // for this week's recommended set.
-  const solvedSet = solvedSlugsThisWeek(cached);
+  const solvedSet = solvedSlugsThisWeek(currentSolves);
 
-  const total = RECOMMENDED_PROBLEMS.length;
-  const solved = RECOMMENDED_PROBLEMS.filter((p) => solvedSet.has(p.slug)).length;
-  const pct = Math.round((solved / total) * 100);
+  const total = currentCatalog.length;
+  const solved = currentCatalog.filter((p) => solvedSet.has(p.slug)).length;
+  const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
 
-  details.hidden = false;
+  details.hidden = total === 0;
   text.textContent = `${solved} / ${total}`;
   fill.style.width = `${pct}%`;
-  fill.className = solved === total ? "progress-fill complete" : "progress-fill";
+  fill.className = total > 0 && solved === total ? "progress-fill complete" : "progress-fill";
   bar.setAttribute("aria-valuenow", String(solved));
   bar.setAttribute("aria-valuemax", String(total));
 
   list.innerHTML = "";
-  for (const p of RECOMMENDED_PROBLEMS) {
+  for (const p of currentCatalog) {
     const isSolved = solvedSet.has(p.slug);
     const li = document.createElement("li");
     li.className = `problem ${isSolved ? "complete" : "pending"}`;
@@ -111,19 +117,25 @@ function renderRecommendedProgress(cached) {
     list.appendChild(li);
   }
 
-  meta.textContent = cached?.syncedAt
-    ? `Synced ${formatRelativeTime(cached.syncedAt)}`
+  meta.textContent = currentSolves?.syncedAt
+    ? `Synced ${formatRelativeTime(currentSolves.syncedAt)}`
     : "Solve a problem on LeetCode to register progress.";
 }
 
-// Two-phase load: render from local cache instantly, then fetch
-// authoritative state from Firestore in the background and overwrite
-// the cache. The onChanged listener picks up the new value and
-// re-renders.
+// Initial load: warm module state from cache for instant render, then
+// kick off background refreshes (catalog from Firestore, student doc
+// from Firestore). The onChanged listener picks up whichever lands
+// first and re-renders.
 async function initRecommendedProgress(netID) {
+  currentCatalog = await getRecommendedProblems();
   const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
-  renderRecommendedProgress(solvedProblems);
+  currentSolves = solvedProblems ?? null;
+  renderRecommendedProgress();
 
+  // Background catalog refresh (writes to cache → onChanged → re-render).
+  refreshRecommendedProblems();
+
+  // Background student-doc refresh (writes to cache → onChanged → re-render).
   try {
     const student = await fetchStudent(netID);
     const raw = student?.solvedProblems;
@@ -140,9 +152,20 @@ async function initRecommendedProgress(netID) {
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.solvedProblems) {
-    renderRecommendedProgress(changes.solvedProblems.newValue);
+  if (areaName !== "local") return;
+  let needsRender = false;
+  if (changes.solvedProblems) {
+    currentSolves = changes.solvedProblems.newValue ?? null;
+    needsRender = true;
   }
+  if (changes.recommendedCatalog) {
+    const next = changes.recommendedCatalog.newValue?.problems;
+    if (Array.isArray(next)) {
+      currentCatalog = next;
+      needsRender = true;
+    }
+  }
+  if (needsRender) renderRecommendedProgress();
 });
 
 // ---- Profile menu ------------------------------------------------------

@@ -8,6 +8,38 @@ const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
   `/databases/(default)/documents`;
 
+// Generic GET for any Firestore doc. Returns parsed fields object or
+// null on 404.
+export async function fetchDoc(path) {
+  const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
+  const response = await fetch(url);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return parseFirestoreFields(data.fields);
+}
+
+// Generic PATCH for any Firestore doc. Uses updateMask so only the
+// named fields are touched; creates the doc if it doesn't exist yet.
+export async function patchDoc(path, fields) {
+  const mask = Object.keys(fields)
+    .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
+    .join("&");
+  const url = `${FIRESTORE_BASE}/${path}?${mask}&key=${firebaseConfig.apiKey}`;
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: encodeFirestoreFields(fields) }),
+  });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Firestore PATCH ${response.status}: ${errorBody}`);
+  }
+  return response.json();
+}
+
 // Returns the parsed student doc, or null if it doesn't exist yet.
 export async function fetchStudent(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;

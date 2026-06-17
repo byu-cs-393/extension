@@ -1,9 +1,19 @@
-// Shared catalog of recommended problems + week-window helpers. Used by
-// the dashboard's Week 6 card and the toolbar popup. Eventually this
-// list will come from per-class Firestore config.
+// Recommended-problem catalog + week-window helpers.
 //
-// Difficulties are best-guess; double-check on LeetCode if it matters.
-export const RECOMMENDED_PROBLEMS = [
+// The catalog lives in Firestore at `classes/{CLASS_ID}.recommendedProblems`
+// so an instructor can update the list without a code push. Clients read
+// from chrome.storage.local for instant render and refresh from Firestore
+// in the background. The first client to find a missing doc auto-seeds
+// it with DEFAULT_PROBLEMS — convenient for dev, harmless because every
+// client would seed the same data.
+import { fetchDoc, patchDoc } from "./firestore.js";
+
+const CLASS_ID = "cs393";
+const CLASS_PATH = `classes/${CLASS_ID}`;
+
+// Fallback used when Firestore is unreachable and there's no cache yet.
+// Also used as the seed value for a missing class doc.
+const DEFAULT_PROBLEMS = [
   { slug: "min-cost-climbing-stairs", title: "Min Cost Climbing Stairs", difficulty: "Easy" },
   { slug: "climbing-stairs", title: "Climbing Stairs", difficulty: "Easy" },
   { slug: "coin-change", title: "Coin Change", difficulty: "Medium" },
@@ -12,6 +22,46 @@ export const RECOMMENDED_PROBLEMS = [
   { slug: "range-sum-query-2d-immutable", title: "Range Sum Query 2D - Immutable", difficulty: "Medium" },
   { slug: "sum-of-distances", title: "Sum of Distances", difficulty: "Hard" },
 ];
+
+// Cached catalog (instant render). May fall back to DEFAULT_PROBLEMS if
+// neither cache nor Firestore is reachable.
+export async function getRecommendedProblems() {
+  const { recommendedCatalog } = await chrome.storage.local.get("recommendedCatalog");
+  const cached = recommendedCatalog?.problems;
+  return Array.isArray(cached) && cached.length ? cached : DEFAULT_PROBLEMS;
+}
+
+// Background refresh — fetch from Firestore, overwrite cache. Storage
+// change fires a re-render in any listening surface (dashboard, popup).
+// Auto-seeds the class doc with defaults if it doesn't exist yet.
+export async function refreshRecommendedProblems() {
+  try {
+    const classDoc = await fetchDoc(CLASS_PATH);
+    const fromCloud = Array.isArray(classDoc?.recommendedProblems)
+      ? classDoc.recommendedProblems
+      : null;
+
+    if (fromCloud === null) {
+      // No doc yet, or no `recommendedProblems` field — seed it.
+      await patchDoc(CLASS_PATH, { recommendedProblems: DEFAULT_PROBLEMS });
+      await cacheCatalog(DEFAULT_PROBLEMS);
+      console.log(`[CS 393 Buddy] seeded ${CLASS_PATH} with default recommended catalog`);
+      return;
+    }
+
+    await cacheCatalog(fromCloud);
+  } catch (error) {
+    console.error("[CS 393 Buddy] failed to refresh recommended catalog:", error);
+  }
+}
+
+async function cacheCatalog(problems) {
+  await chrome.storage.local.set({
+    recommendedCatalog: { problems, syncedAt: Date.now() },
+  });
+}
+
+// ---- Week-window helpers -----------------------------------------------
 
 // Monday 00:00 (local time) of the current week, in epoch ms.
 export function getCurrentWeekStart() {
@@ -41,8 +91,9 @@ export function solvedSlugsThisWeek(cached) {
   );
 }
 
-// First recommended problem not yet solved this week, or null if all done.
-export function firstUnsolved(cached) {
+// First problem in `problems` that hasn't been solved this week, or null
+// if everything is done.
+export function firstUnsolved(cached, problems) {
   const solved = solvedSlugsThisWeek(cached);
-  return RECOMMENDED_PROBLEMS.find((p) => !solved.has(p.slug)) ?? null;
+  return problems.find((p) => !solved.has(p.slug)) ?? null;
 }

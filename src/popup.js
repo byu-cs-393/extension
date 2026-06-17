@@ -1,5 +1,6 @@
 import {
-  RECOMMENDED_PROBLEMS,
+  getRecommendedProblems,
+  refreshRecommendedProblems,
   solvedSlugsThisWeek,
   firstUnsolved,
   getCurrentWeekStart,
@@ -16,51 +17,70 @@ const detail = document.getElementById("popup-detail");
 const nextBtn = document.getElementById("popup-next-btn");
 const openDashboardBtn = document.getElementById("open-dashboard");
 
+// Module-scoped state — render() reads from these.
+let currentCatalog = [];
+let currentSolves = null;
+
 function renderWeekLabel() {
   const start = new Date(getCurrentWeekStart());
   const end = new Date(getCurrentWeekEnd() - 1);
   weekLabel.textContent = `This week · ${SHORT_DATE.format(start)} – ${SHORT_DATE.format(end)}`;
 }
 
-function renderProgress(cached) {
-  const total = RECOMMENDED_PROBLEMS.length;
-  const solvedSet = solvedSlugsThisWeek(cached);
-  const solved = RECOMMENDED_PROBLEMS.filter((p) => solvedSet.has(p.slug)).length;
-  const pct = Math.round((solved / total) * 100);
+function render() {
+  const total = currentCatalog.length;
+  const solvedSet = solvedSlugsThisWeek(currentSolves);
+  const solved = currentCatalog.filter((p) => solvedSet.has(p.slug)).length;
+  const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
 
-  text.textContent = `${solved} / ${total}`;
+  text.textContent = `${solved} / ${total || 7}`;
   fill.style.width = `${pct}%`;
-  fill.className = solved === total ? "progress-fill complete" : "progress-fill";
+  fill.className = total > 0 && solved === total ? "progress-fill complete" : "progress-fill";
   bar.setAttribute("aria-valuenow", String(solved));
-  bar.setAttribute("aria-valuemax", String(total));
+  bar.setAttribute("aria-valuemax", String(total || 7));
 
-  const next = firstUnsolved(cached);
+  if (total === 0) {
+    detail.textContent = "Loading recommended problems…";
+    nextBtn.hidden = true;
+    return;
+  }
+
+  const next = firstUnsolved(currentSolves, currentCatalog);
   if (next) {
     detail.textContent = `Currently on: ${next.title}`;
     nextBtn.hidden = false;
     nextBtn.dataset.slug = next.slug;
-  } else if (solved === total) {
+  } else {
     detail.textContent = "✓ All recommended problems solved this week.";
     nextBtn.hidden = true;
     delete nextBtn.dataset.slug;
-  } else {
-    // No solves yet, or empty cache.
-    detail.textContent = "Visit leetcode.com to sync progress.";
-    nextBtn.hidden = false;
-    nextBtn.dataset.slug = RECOMMENDED_PROBLEMS[0].slug;
   }
 }
 
 async function init() {
   renderWeekLabel();
+  currentCatalog = await getRecommendedProblems();
   const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
-  renderProgress(solvedProblems);
+  currentSolves = solvedProblems ?? null;
+  render();
+  refreshRecommendedProblems();
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.solvedProblems) {
-    renderProgress(changes.solvedProblems.newValue);
+  if (areaName !== "local") return;
+  let needsRender = false;
+  if (changes.solvedProblems) {
+    currentSolves = changes.solvedProblems.newValue ?? null;
+    needsRender = true;
   }
+  if (changes.recommendedCatalog) {
+    const next = changes.recommendedCatalog.newValue?.problems;
+    if (Array.isArray(next)) {
+      currentCatalog = next;
+      needsRender = true;
+    }
+  }
+  if (needsRender) render();
 });
 
 nextBtn.addEventListener("click", () => {
