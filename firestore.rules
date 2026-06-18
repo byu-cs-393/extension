@@ -1,0 +1,105 @@
+// CS 393 Buddy — Firestore security rules.
+//
+// CAVEAT: these are schema-only rules. They restrict allowed paths,
+// validate document shape, and enforce a few key field constraints, but
+// they do NOT enforce per-user authorization — every Firestore REST
+// call the extension makes is unauthenticated (project API key only,
+// no Firebase Auth token). Anyone running the extension can write to
+// any student's doc if they know the netID. Real per-user
+// authorization needs Firebase Auth, which is a separate, larger track.
+//
+// What these rules DO defend against:
+//   - Typos that would create docs at unexpected paths
+//   - Corrupt or compromised clients writing garbage shapes
+//   - Accidental data spillage into unexpected fields
+//   - Random deletion / mutation of activity events (which should be
+//     append-only)
+//
+// How to deploy:
+//   1. Open https://console.firebase.google.com/project/cs393-496021/firestore/rules
+//   2. Replace the editor contents with this file's contents
+//   3. Click Publish
+//
+// Keep this file in sync with the rules deployed to the Console — it's
+// the version-controlled source of truth.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- students/{netID} ----------------------------------------------
+    // Student profile + denormalized solved-during-class state. Written
+    // by onboarding (name/note/leetcodeUsername) and by leetcode-tracker.js
+    // (solvedProblems map). Read by dashboard, popup, tracker, backstop.
+    match /students/{netID} {
+      allow read: if true;
+      allow write: if isValidNetID(netID) && isValidStudentDoc(request.resource.data);
+    }
+
+    function isValidNetID(netID) {
+      return netID is string && netID.matches('^[a-z][a-z0-9]{1,15}$');
+    }
+
+    function isValidStudentDoc(data) {
+      return data.keys().hasOnly([
+        'name', 'note', 'leetcodeUsername', 'solvedProblems', 'studentID'
+      ]);
+    }
+
+    // ---- activity/{eventId} --------------------------------------------
+    // Append-only event log written by leetcode-tracker.js.
+    // open_problem / submit_pass / submit_fail events.
+    match /activity/{eventId} {
+      allow read: if true;
+      allow create: if isValidActivityEvent(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    function isValidActivityEvent(data) {
+      return data.keys().hasAll(['studentNetID', 'eventType', 'source', 'timestamp'])
+          && data.keys().hasOnly([
+               'studentNetID', 'eventType', 'source', 'timestamp',
+               'problemSlug', 'problemTitle', 'verdict'
+             ])
+          && data.studentNetID is string
+          && data.eventType in ['open_problem', 'submit_pass', 'submit_fail']
+          && data.source == 'leetcode';
+    }
+
+    // ---- classes/{classId} ---------------------------------------------
+    // Class-level config doc. Currently open for the legacy auto-seed
+    // path; tighten when there's a Cloud Function / admin UI doing seeds.
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // ---- classes/{classId}/weeks/{weekNum} -----------------------------
+    // Per-week assignment definitions: { weekNum, startDate, endDate,
+    // problems: [{slug, title, difficulty}, ...] }. Auto-seeded by
+    // recommended.js on first run; edited by the instructor (and
+    // eventually a TA admin UI) for the real semester.
+    match /classes/{classId}/weeks/{weekNum} {
+      allow read: if true;
+      allow write: if isValidWeekDoc(request.resource.data);
+    }
+
+    function isValidWeekDoc(data) {
+      return data.keys().hasAll(['weekNum', 'startDate', 'endDate', 'problems'])
+          && data.keys().hasOnly(['weekNum', 'startDate', 'endDate', 'problems'])
+          && data.weekNum is number
+          && data.startDate is number
+          && data.endDate is number
+          && data.endDate > data.startDate
+          && data.problems is list;
+    }
+
+    // ---- Default: deny --------------------------------------------------
+    // Firestore is already deny-by-default for unmatched paths; this
+    // explicit catch-all just makes intent obvious.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
