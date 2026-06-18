@@ -10,7 +10,8 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://firestore.googleapis.com/*",
-    "https://leetcode.com/*"
+    "https://leetcode.com/*",
+    "https://byu.instructure.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -24,6 +25,11 @@
     {
       "matches": ["https://leetcode.com/problems/*"],
       "js": ["leetcode-tracker.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://byu.instructure.com/*"],
+      "js": ["canvas-auth.js"],
       "run_at": "document_idle"
     }
   ]

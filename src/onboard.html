@@ -24,6 +24,11 @@
           Canvas.
         </p>
 
+        <div id="canvas-banner" class="canvas-banner" hidden>
+          <span class="canvas-banner-check" aria-hidden="true">✓</span>
+          <span>Signed in to Canvas as <strong id="canvas-banner-netid"></strong> — fields auto-filled below.</span>
+        </div>
+
         <form id="step1-form" class="onboard-form">
           <div class="field">
             <label for="input-netid">
@@ -39,6 +44,23 @@
               spellcheck="false"
               required
               placeholder="netID"
+            />
+          </div>
+
+          <div class="field">
+            <label for="input-studentid">
+              BYU Student ID
+              <span class="hint">9 digits, e.g. <code>12-345-6789</code></span>
+            </label>
+            <input
+              type="text"
+              id="input-studentid"
+              name="studentid"
+              autocomplete="off"
+              inputmode="numeric"
+              spellcheck="false"
+              required
+              placeholder="12-345-6789"
             />
           </div>
 

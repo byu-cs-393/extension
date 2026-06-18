@@ -10,9 +10,12 @@ import { fetchStudent, updateStudent } from "./firestore.js";
 const step1Panel = document.querySelector('.step-panel[data-step="1"]');
 const step1Form = document.getElementById("step1-form");
 const netidInput = document.getElementById("input-netid");
+const studentIdInput = document.getElementById("input-studentid");
 const nameInput = document.getElementById("input-name");
 const noteInput = document.getElementById("input-note");
 const step1Status = document.getElementById("step1-status");
+const canvasBanner = document.getElementById("canvas-banner");
+const canvasBannerNetid = document.getElementById("canvas-banner-netid");
 
 // ---- Step 2 references -------------------------------------------------
 
@@ -37,6 +40,19 @@ const stepPills = document.querySelectorAll(".step-indicator .step");
 // (BYU netIDs are usually surname-initials + a number.)
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
 
+// BYU Student ID: 9 digits. The student may type with dashes
+// (12-345-6789) or without — we normalize to digits-only before saving.
+const STUDENT_ID_DIGITS_REGEX = /^\d{9}$/;
+
+function normalizeStudentId(raw) {
+  return raw.replace(/[^0-9]/g, "");
+}
+
+function formatStudentId(digits) {
+  if (digits.length !== 9) return digits;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
+}
+
 // ---- Step navigation ---------------------------------------------------
 
 function showStep(n) {
@@ -47,6 +63,27 @@ function showStep(n) {
     pill.classList.toggle("active", step === n);
     pill.classList.toggle("complete", step < n);
   });
+}
+
+// ---- Canvas auto-fill --------------------------------------------------
+
+// Fill the netID / name inputs from Canvas if they're empty AND Canvas
+// reports a signed-in session. Doesn't overwrite a value the student
+// already typed.
+function applyCanvasAuth(auth) {
+  if (!auth?.signedIn || !auth.netID) {
+    canvasBanner.hidden = true;
+    return;
+  }
+  const netidCandidate = String(auth.netID).toLowerCase();
+  if (NETID_REGEX.test(netidCandidate) && !netidInput.value.trim()) {
+    netidInput.value = netidCandidate;
+  }
+  if (auth.name && !nameInput.value.trim()) {
+    nameInput.value = auth.name;
+  }
+  canvasBannerNetid.textContent = netidCandidate;
+  canvasBanner.hidden = false;
 }
 
 // ---- Step 2: LeetCode auth state rendering -----------------------------
@@ -64,10 +101,14 @@ function renderLeetcodeState(auth) {
 // ---- Initial load ------------------------------------------------------
 
 (async () => {
-  const { netID, leetcodeUsername } = await chrome.storage.sync.get([
+  const { netID, studentID, leetcodeUsername } = await chrome.storage.sync.get([
     "netID",
+    "studentID",
     "leetcodeUsername",
   ]);
+  if (studentID) {
+    studentIdInput.value = formatStudentId(studentID);
+  }
   if (!netID) {
     showStep(1);
     return;
@@ -94,17 +135,25 @@ function renderLeetcodeState(auth) {
   }
 })();
 
-// Render LeetCode state from whatever's already in local storage, then
-// keep it live via onChanged so the moment leetcode-auth.js writes a
-// signed-in session we react.
+// Render LeetCode + Canvas state from whatever's already in local
+// storage. Then keep both live via onChanged.
 (async () => {
-  const { leetcodeAuth } = await chrome.storage.local.get("leetcodeAuth");
+  const { leetcodeAuth, canvasAuth } = await chrome.storage.local.get([
+    "leetcodeAuth",
+    "canvasAuth",
+  ]);
   renderLeetcodeState(leetcodeAuth);
+  applyCanvasAuth(canvasAuth);
 })();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes.leetcodeAuth) return;
-  renderLeetcodeState(changes.leetcodeAuth.newValue);
+  if (areaName !== "local") return;
+  if (changes.leetcodeAuth) {
+    renderLeetcodeState(changes.leetcodeAuth.newValue);
+  }
+  if (changes.canvasAuth) {
+    applyCanvasAuth(changes.canvasAuth.newValue);
+  }
 });
 
 // ---- Step 1 submit -----------------------------------------------------
@@ -112,6 +161,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 step1Form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const netID = netidInput.value.trim().toLowerCase();
+  const studentID = normalizeStudentId(studentIdInput.value);
   const name = nameInput.value.trim();
   const note = noteInput.value.trim();
 
@@ -120,11 +170,19 @@ step1Form.addEventListener("submit", async (event) => {
     step1Status.className = "onboard-status error";
     return;
   }
+  if (!STUDENT_ID_DIGITS_REGEX.test(studentID)) {
+    step1Status.textContent = "Student ID should be 9 digits (e.g. 12-345-6789).";
+    step1Status.className = "onboard-status error";
+    return;
+  }
 
   step1Status.textContent = "Saving…";
   step1Status.className = "onboard-status";
   try {
-    await chrome.storage.sync.set({ netID });
+    // netID + studentID stay local (sync storage). studentID is a "soft
+    // secret" used by the eventual Cloud Function for identity
+    // verification; it doesn't belong in any public student doc.
+    await chrome.storage.sync.set({ netID, studentID });
     const fields = {};
     if (name) fields.name = name;
     if (note) fields.note = note;
