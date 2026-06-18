@@ -21,6 +21,22 @@ export async function fetchDoc(path) {
   return parseFirestoreFields(data.fields);
 }
 
+// Generic LIST for any Firestore collection or subcollection. Returns
+// an array of parsed docs (in Firestore's default order — server-side
+// for top-level, document-name order for subcollections). Does not
+// handle pagination; for the small classes/{cs393}/weeks scale we care
+// about, the default page size (~100) is plenty.
+export async function fetchCollection(path) {
+  const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
+  const response = await fetch(url);
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return (data.documents ?? []).map((doc) => parseFirestoreFields(doc.fields));
+}
+
 // Generic PATCH for any Firestore doc. Uses updateMask so only the
 // named fields are touched; creates the doc if it doesn't exist yet.
 export async function patchDoc(path, fields) {

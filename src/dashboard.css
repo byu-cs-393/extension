@@ -158,6 +158,20 @@ body {
   background: var(--hover-bg);
 }
 
+/* Weeks container (populated dynamically) */
+.weeks-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.weeks-empty {
+  text-align: center;
+  padding: 24px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 /* Week section */
 .week {
   margin-bottom: 36px;

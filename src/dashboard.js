@@ -1,15 +1,14 @@
 import { fetchStudent } from "./firestore.js";
 import {
-  getRecommendedProblems,
-  refreshRecommendedProblems,
-  getCurrentWeekStart,
-  getCurrentWeekEnd,
-  solvedSlugsThisWeek,
+  getWeeks,
+  refreshWeeks,
+  classifyWeek,
+  solvedSlugsInWeek,
 } from "./recommended.js";
 
 // Module-scoped state — render() reads from these. Two paths update
 // them: chrome.storage.onChanged (live), or the bootstrap (initial).
-let currentCatalog = [];
+let currentWeeks = [];
 let currentSolves = null;
 
 async function getNetID() {
@@ -33,9 +32,10 @@ async function loadAndRender(netID) {
   }
 }
 
-// ---- Recommended-problem card ------------------------------------------
+// ---- Week rendering ----------------------------------------------------
 
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
 function formatRelativeTime(timestamp) {
   if (!timestamp) return "";
@@ -55,93 +55,204 @@ function formatRelativeTime(timestamp) {
   return RELATIVE_TIME_FORMATTER.format(Math.round(seconds / 604800), "week");
 }
 
-const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
-
-function renderWeekHeader() {
-  const dates = document.getElementById("week-dates");
-  if (!dates) return;
-  const start = new Date(getCurrentWeekStart());
-  const end = new Date(getCurrentWeekEnd() - 1); // inclusive Sunday
-  dates.textContent = `${SHORT_DATE.format(start)} – ${SHORT_DATE.format(end)}`;
+function formatDateRange(startMs, endMs) {
+  const start = new Date(startMs);
+  const end = new Date(endMs - 1); // inclusive Sunday
+  const startStr = SHORT_DATE.format(start);
+  if (start.getMonth() === end.getMonth()) {
+    return `${startStr} – ${end.getDate()}`;
+  }
+  return `${startStr} – ${SHORT_DATE.format(end)}`;
 }
 
-function renderRecommendedProgress() {
-  const list = document.getElementById("recommended-list");
-  const fill = document.getElementById("recommended-fill");
-  const text = document.getElementById("recommended-text");
-  const bar = document.getElementById("recommended-bar");
-  const meta = document.getElementById("recommended-meta");
-  const details = document.getElementById("recommended-details");
+function renderWeeks() {
+  const container = document.getElementById("weeks-container");
+  container.innerHTML = "";
 
-  // Only solves whose timestamp falls inside this week's window count
-  // for this week's recommended set.
-  const solvedSet = solvedSlugsThisWeek(currentSolves);
+  // Visible weeks: current + past. Future weeks hidden until they start.
+  const now = Date.now();
+  const visible = currentWeeks
+    .filter((w) => w.startDate <= now)
+    .sort((a, b) => b.weekNum - a.weekNum); // newest first
 
-  const total = currentCatalog.length;
-  const solved = currentCatalog.filter((p) => solvedSet.has(p.slug)).length;
-  const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
-
-  details.hidden = total === 0;
-  text.textContent = `${solved} / ${total}`;
-  fill.style.width = `${pct}%`;
-  fill.className = total > 0 && solved === total ? "progress-fill complete" : "progress-fill";
-  bar.setAttribute("aria-valuenow", String(solved));
-  bar.setAttribute("aria-valuemax", String(total));
-
-  list.innerHTML = "";
-  for (const p of currentCatalog) {
-    const isSolved = solvedSet.has(p.slug);
-    const li = document.createElement("li");
-    li.className = `problem ${isSolved ? "complete" : "pending"}`;
-
-    const mark = document.createElement("span");
-    mark.className = "problem-mark";
-    mark.textContent = isSolved ? "✓" : "○";
-
-    const link = document.createElement("a");
-    link.className = "problem-link";
-    link.href = `https://leetcode.com/problems/${p.slug}/`;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = p.title;
-
-    li.appendChild(mark);
-    li.appendChild(link);
-
-    if (p.difficulty) {
-      const diff = document.createElement("span");
-      diff.className = `problem-diff diff-${p.difficulty.toLowerCase()}`;
-      diff.textContent = p.difficulty;
-      li.appendChild(diff);
-    }
-    list.appendChild(li);
+  if (visible.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "weeks-empty";
+    empty.textContent = "No weeks yet. Visit leetcode.com to seed the schedule.";
+    container.appendChild(empty);
+    return;
   }
 
-  meta.textContent = currentSolves?.syncedAt
-    ? `Synced ${formatRelativeTime(currentSolves.syncedAt)}`
-    : "Solve a problem on LeetCode to register progress.";
+  for (const week of visible) {
+    container.appendChild(createWeekSection(week, classifyWeek(week, now)));
+  }
 }
 
-// Initial load: warm module state from cache for instant render, then
-// kick off background refreshes (catalog from Firestore, student doc
-// from Firestore). The onChanged listener picks up whichever lands
-// first and re-renders.
-async function initRecommendedProgress(netID) {
-  currentCatalog = await getRecommendedProblems();
+function createWeekSection(week, status) {
+  const section = document.createElement("section");
+  section.className = "week";
+  section.dataset.weekNum = String(week.weekNum);
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "week-header";
+
+  const title = document.createElement("h2");
+  title.className = "week-title";
+  title.append(`Week ${week.weekNum}`);
+  if (status === "current") {
+    const badge = document.createElement("span");
+    badge.className = "week-badge";
+    badge.textContent = "Current";
+    title.appendChild(badge);
+  }
+
+  const dates = document.createElement("div");
+  dates.className = "week-dates";
+  dates.textContent = formatDateRange(week.startDate, week.endDate);
+
+  header.append(title, dates);
+  section.appendChild(header);
+
+  section.appendChild(createRecommendedCard(week, status));
+  return section;
+}
+
+function createRecommendedCard(week, status) {
+  const solvedSet = solvedSlugsInWeek(week, currentSolves);
+  const total = week.problems.length;
+  const solved = week.problems.filter((p) => solvedSet.has(p.slug)).length;
+  const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
+  const isComplete = total > 0 && solved === total;
+
+  const article = document.createElement("article");
+  article.className = "card";
+
+  const cardTitle = document.createElement("div");
+  cardTitle.className = "card-title";
+  cardTitle.textContent = "Recommended problems";
+  article.appendChild(cardTitle);
+
+  // Progress bar
+  const progress = document.createElement("div");
+  progress.className = "progress";
+
+  const bar = document.createElement("div");
+  bar.className = "progress-bar";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", String(total));
+  bar.setAttribute("aria-valuenow", String(solved));
+
+  const fill = document.createElement("div");
+  fill.style.width = `${pct}%`;
+  if (isComplete) {
+    fill.className = "progress-fill complete";
+  } else if (status === "past") {
+    fill.className = "progress-fill incomplete";
+  } else {
+    fill.className = "progress-fill";
+  }
+
+  bar.appendChild(fill);
+
+  const text = document.createElement("div");
+  text.className = "progress-text";
+  text.textContent = `${solved} / ${total}`;
+  if (isComplete) {
+    const check = document.createElement("span");
+    check.className = "status-check";
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = " ✓";
+    text.appendChild(check);
+  }
+
+  progress.append(bar, text);
+  article.appendChild(progress);
+
+  // Collapsible problem list — always rendered, collapsed by default.
+  if (total > 0) {
+    const details = document.createElement("details");
+    details.className = "problem-details";
+
+    const summary = document.createElement("summary");
+    summary.className = "problem-details-summary";
+    const summaryText = document.createElement("span");
+    summaryText.textContent = "Show problems";
+    const chevron = document.createElement("span");
+    chevron.className = "chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "▾";
+    summary.append(summaryText, chevron);
+    details.appendChild(summary);
+
+    const list = document.createElement("ul");
+    list.className = "card-list problem-list";
+    for (const p of week.problems) {
+      list.appendChild(createProblemItem(p, solvedSet.has(p.slug)));
+    }
+    details.appendChild(list);
+    article.appendChild(details);
+  }
+
+  // Meta line
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  if (status === "current") {
+    meta.textContent = currentSolves?.syncedAt
+      ? `Synced ${formatRelativeTime(currentSolves.syncedAt)}`
+      : "Solve a problem on LeetCode to register progress.";
+  } else if (status === "past" && !isComplete) {
+    const ended = SHORT_DATE.format(new Date(week.endDate - 1));
+    meta.textContent = `Week ended ${ended} — no more credit.`;
+  }
+  article.appendChild(meta);
+
+  return article;
+}
+
+function createProblemItem(p, isSolved) {
+  const li = document.createElement("li");
+  li.className = `problem ${isSolved ? "complete" : "pending"}`;
+
+  const mark = document.createElement("span");
+  mark.className = "problem-mark";
+  mark.textContent = isSolved ? "✓" : "○";
+
+  const link = document.createElement("a");
+  link.className = "problem-link";
+  link.href = `https://leetcode.com/problems/${p.slug}/`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = p.title;
+
+  li.append(mark, link);
+
+  if (p.difficulty) {
+    const diff = document.createElement("span");
+    diff.className = `problem-diff diff-${p.difficulty.toLowerCase()}`;
+    diff.textContent = p.difficulty;
+    li.appendChild(diff);
+  }
+  return li;
+}
+
+// ---- Bootstrap + storage listener -------------------------------------
+
+async function initWeeks(netID) {
+  currentWeeks = await getWeeks();
   const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
   currentSolves = solvedProblems ?? null;
-  renderRecommendedProgress();
+  renderWeeks();
 
-  // Background catalog refresh (writes to cache → onChanged → re-render).
-  refreshRecommendedProblems();
+  // Background weeks refresh — pulls Firestore, auto-seeds if empty.
+  refreshWeeks();
 
-  // Background student-doc refresh (writes to cache → onChanged → re-render).
+  // Background student-doc refresh — pulls Firestore, writes to cache,
+  // storage.onChanged fires re-render.
   try {
     const student = await fetchStudent(netID);
     const raw = student?.solvedProblems;
-    // New shape: map of slug → timestampMs. Legacy arrays from older
-    // schema versions are ignored — the backstop will repopulate from
-    // recent ACs.
     const solves = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     await chrome.storage.local.set({
       solvedProblems: { solves, syncedAt: Date.now() },
@@ -158,14 +269,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentSolves = changes.solvedProblems.newValue ?? null;
     needsRender = true;
   }
-  if (changes.recommendedCatalog) {
-    const next = changes.recommendedCatalog.newValue?.problems;
+  if (changes.weeksCatalog) {
+    const next = changes.weeksCatalog.newValue?.weeks;
     if (Array.isArray(next)) {
-      currentCatalog = next;
+      currentWeeks = next;
       needsRender = true;
     }
   }
-  if (needsRender) renderRecommendedProgress();
+  if (needsRender) renderWeeks();
 });
 
 // ---- Profile menu ------------------------------------------------------
@@ -211,6 +322,5 @@ function wireProfileMenu() {
   }
   loadAndRender(netID);
   wireProfileMenu();
-  renderWeekHeader();
-  initRecommendedProgress(netID);
+  initWeeks(netID);
 })();
