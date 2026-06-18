@@ -16,7 +16,7 @@
         </ol>
       </header>
 
-      <!-- Step 1: BYU info -->
+      <!-- Step 1: Canvas identity -->
       <section class="step-panel" data-step="1">
         <h1>Welcome to CS 393 Buddy</h1>
         <p class="lede">
@@ -24,70 +24,61 @@
           Canvas.
         </p>
 
-        <div id="canvas-banner" class="canvas-banner" hidden>
-          <span class="canvas-banner-check" aria-hidden="true">✓</span>
-          <span>Signed in to Canvas as <strong id="canvas-banner-netid"></strong> — fields auto-filled below.</span>
+        <!-- Canvas signed out: prompt the student to sign in. -->
+        <div id="canvas-signed-out" class="canvas-state">
+          <p>
+            We use your BYU Canvas session to verify your identity. Sign in to Canvas and we'll
+            detect you automatically — no typing required.
+          </p>
+          <button type="button" class="btn-primary" id="open-canvas-btn">
+            Open BYU Canvas →
+          </button>
+          <p class="hint">
+            Already signed in?
+            <button type="button" class="btn-link inline" id="canvas-recheck-btn">
+              Re-check session
+            </button>
+          </p>
         </div>
 
-        <form id="step1-form" class="onboard-form">
-          <div class="field">
-            <label for="input-netid">
-              BYU netID
-              <span class="hint">e.g. <code>jdoe7</code></span>
-            </label>
-            <input
-              type="text"
-              id="input-netid"
-              name="netid"
-              autocomplete="username"
-              autocapitalize="off"
-              spellcheck="false"
-              required
-              placeholder="netID"
-            />
+        <!-- Canvas signed in: show identity card + form for display name / note. -->
+        <div id="canvas-signed-in" class="canvas-state" hidden>
+          <div class="canvas-card">
+            <div class="canvas-card-label">Signed in to Canvas as</div>
+            <div class="canvas-card-netid" id="canvas-card-netid">…</div>
+            <div class="canvas-card-realname" id="canvas-card-name"></div>
           </div>
 
-          <div class="field">
-            <label for="input-studentid">
-              BYU Student ID
-              <span class="hint">9 digits, e.g. <code>12-345-6789</code></span>
-            </label>
-            <input
-              type="text"
-              id="input-studentid"
-              name="studentid"
-              autocomplete="off"
-              inputmode="numeric"
-              spellcheck="false"
-              required
-              placeholder="12-345-6789"
-            />
-          </div>
+          <form id="step1-form" class="onboard-form">
+            <div class="field">
+              <label for="input-name">
+                Display name
+                <span class="hint">how the dashboard greets you</span>
+              </label>
+              <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
+            </div>
 
-          <div class="field">
-            <label for="input-name">
-              Display name
-              <span class="hint">how the dashboard greets you</span>
-            </label>
-            <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
-          </div>
+            <div class="field">
+              <label for="input-note">
+                Status note
+                <span class="hint">optional</span>
+              </label>
+              <input
+                type="text"
+                id="input-note"
+                autocomplete="off"
+                placeholder="e.g. focused on hash maps this week"
+              />
+            </div>
 
-          <div class="field">
-            <label for="input-note">
-              Status note
-              <span class="hint">optional</span>
-            </label>
-            <input
-              type="text"
-              id="input-note"
-              autocomplete="off"
-              placeholder="e.g. focused on hash maps this week"
-            />
-          </div>
+            <button type="submit" class="btn-primary">Continue →</button>
+            <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
+          </form>
 
-          <button type="submit" class="btn-primary">Continue →</button>
-          <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
-        </form>
+          <button type="button" class="btn-link" id="canvas-switch-btn">
+            Sign in to Canvas with a different account
+          </button>
+        </div>
       </section>
 
       <!-- Step 2: LeetCode -->

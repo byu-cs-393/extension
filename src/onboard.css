@@ -178,24 +178,48 @@ h1 {
   color: var(--error);
 }
 
-/* Canvas auto-fill banner */
-.canvas-banner {
+/* Canvas signed-in / signed-out states (step 1) */
+.canvas-state {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 16px;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.canvas-state[hidden] {
+  display: none;
+}
+
+.canvas-card {
+  width: 100%;
+  padding: 16px;
   background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+}
+
+.canvas-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: #15803d;
-  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.canvas-card-netid {
+  font-size: 18px;
+  font-weight: 600;
+  color: #14532d;
+}
+
+.canvas-card-realname {
   font-size: 13px;
+  color: #166534;
+  margin-top: 2px;
 }
 
-.canvas-banner-check {
-  font-weight: 700;
-}
-
-.canvas-banner[hidden] {
+.canvas-card-realname:empty {
   display: none;
 }
 

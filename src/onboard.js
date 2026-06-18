@@ -1,21 +1,29 @@
 import { fetchStudent, updateStudent } from "./firestore.js";
 
 // Two-step wizard:
-//   Step 1 — BYU info: netID (required), display name + status note (optional).
+//   Step 1 — Canvas identity: requires an active BYU Canvas session.
+//            netID + lti_user_id come from Canvas; the student fills in
+//            display name + optional status note. No typed BYU ID — the
+//            Canvas session itself is the identity proof, verified by
+//            phase 2's Cloud Function via the instructor's Canvas API
+//            token.
 //   Step 2 — LeetCode link: detect via leetcode-auth content script,
 //            confirm identity, save linked username.
 
 // ---- Step 1 references -------------------------------------------------
 
 const step1Panel = document.querySelector('.step-panel[data-step="1"]');
+const canvasSignedOutBlock = document.getElementById("canvas-signed-out");
+const canvasSignedInBlock = document.getElementById("canvas-signed-in");
+const openCanvasBtn = document.getElementById("open-canvas-btn");
+const canvasRecheckBtn = document.getElementById("canvas-recheck-btn");
+const canvasSwitchBtn = document.getElementById("canvas-switch-btn");
+const canvasCardNetid = document.getElementById("canvas-card-netid");
+const canvasCardName = document.getElementById("canvas-card-name");
 const step1Form = document.getElementById("step1-form");
-const netidInput = document.getElementById("input-netid");
-const studentIdInput = document.getElementById("input-studentid");
 const nameInput = document.getElementById("input-name");
 const noteInput = document.getElementById("input-note");
 const step1Status = document.getElementById("step1-status");
-const canvasBanner = document.getElementById("canvas-banner");
-const canvasBannerNetid = document.getElementById("canvas-banner-netid");
 
 // ---- Step 2 references -------------------------------------------------
 
@@ -31,27 +39,12 @@ const step2Status = document.getElementById("step2-status");
 const usernameLabel = document.getElementById("leetcode-username");
 const realnameLabel = document.getElementById("leetcode-realname");
 
-// Step indicator pills.
 const stepPills = document.querySelectorAll(".step-indicator .step");
 
 // ---- Validation --------------------------------------------------------
 
 // netID format: 1–8 lowercase letters followed by optional digits.
-// (BYU netIDs are usually surname-initials + a number.)
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
-
-// BYU Student ID: 9 digits. The student may type with dashes
-// (12-345-6789) or without — we normalize to digits-only before saving.
-const STUDENT_ID_DIGITS_REGEX = /^\d{9}$/;
-
-function normalizeStudentId(raw) {
-  return raw.replace(/[^0-9]/g, "");
-}
-
-function formatStudentId(digits) {
-  if (digits.length !== 9) return digits;
-  return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
-}
 
 // ---- Step navigation ---------------------------------------------------
 
@@ -65,25 +58,50 @@ function showStep(n) {
   });
 }
 
-// ---- Canvas auto-fill --------------------------------------------------
+// ---- Step 1: Canvas state rendering ------------------------------------
 
-// Fill the netID / name inputs from Canvas if they're empty AND Canvas
-// reports a signed-in session. Doesn't overwrite a value the student
-// already typed.
-function applyCanvasAuth(auth) {
-  if (!auth?.signedIn || !auth.netID) {
-    canvasBanner.hidden = true;
-    return;
+// Module-scoped Canvas state — the form needs to read this when submitting.
+let currentCanvasAuth = null;
+
+function renderCanvasState(auth) {
+  currentCanvasAuth = auth;
+  const signedIn =
+    !!auth?.signedIn &&
+    typeof auth.netID === "string" &&
+    NETID_REGEX.test(auth.netID) &&
+    !!auth.ltiUserId;
+
+  canvasSignedOutBlock.hidden = signedIn;
+  canvasSignedInBlock.hidden = !signedIn;
+  if (signedIn) {
+    canvasCardNetid.textContent = auth.netID;
+    canvasCardName.textContent = auth.name || "";
   }
-  const netidCandidate = String(auth.netID).toLowerCase();
-  if (NETID_REGEX.test(netidCandidate) && !netidInput.value.trim()) {
-    netidInput.value = netidCandidate;
+}
+
+// Pre-fill display name + status note from any existing student doc, but
+// only when we know the netID (i.e., once Canvas detection has landed).
+let lastPrefilledForNetID = null;
+async function maybePrefillProfile(netID) {
+  if (!netID || netID === lastPrefilledForNetID) return;
+  lastPrefilledForNetID = netID;
+  try {
+    const student = await fetchStudent(netID);
+    if (student) {
+      if (!nameInput.value.trim() && typeof student.name === "string") {
+        nameInput.value = student.name;
+      } else if (!nameInput.value.trim() && currentCanvasAuth?.name) {
+        nameInput.value = currentCanvasAuth.name;
+      }
+      if (!noteInput.value.trim() && typeof student.note === "string") {
+        noteInput.value = student.note;
+      }
+    } else if (currentCanvasAuth?.name && !nameInput.value.trim()) {
+      nameInput.value = currentCanvasAuth.name;
+    }
+  } catch (error) {
+    console.error("Failed to fetch existing student:", error);
   }
-  if (auth.name && !nameInput.value.trim()) {
-    nameInput.value = auth.name;
-  }
-  canvasBannerNetid.textContent = netidCandidate;
-  canvasBanner.hidden = false;
 }
 
 // ---- Step 2: LeetCode auth state rendering -----------------------------
@@ -101,49 +119,40 @@ function renderLeetcodeState(auth) {
 // ---- Initial load ------------------------------------------------------
 
 (async () => {
-  const { netID, studentID, leetcodeUsername } = await chrome.storage.sync.get([
+  const { netID, leetcodeUsername } = await chrome.storage.sync.get([
     "netID",
-    "studentID",
     "leetcodeUsername",
   ]);
-  if (studentID) {
-    studentIdInput.value = formatStudentId(studentID);
-  }
-  if (!netID) {
-    showStep(1);
-    return;
-  }
 
-  netidInput.value = netID;
-  try {
-    const student = await fetchStudent(netID);
-    if (student) {
-      nameInput.value = student.name ?? "";
-      noteInput.value = student.note ?? "";
-    }
-  } catch (error) {
-    console.error("Failed to fetch existing student:", error);
-  }
-
-  // If the student already finished step 2 previously, drop them on
-  // step 2 so they can re-confirm or change accounts.
-  if (leetcodeUsername) {
+  // If the student already finished step 2 previously, land them there
+  // so they can re-confirm or change accounts.
+  if (netID && leetcodeUsername) {
     showStep(2);
   } else {
     showStep(1);
-    step1Status.textContent = `Already set up as ${netID}.`;
+    if (netID) {
+      step1Status.textContent = `Previously linked to ${netID}.`;
+    }
+  }
+
+  // Pre-fill name/note if we already have a netID on file.
+  if (netID) {
+    await maybePrefillProfile(netID);
   }
 })();
 
-// Render LeetCode + Canvas state from whatever's already in local
-// storage. Then keep both live via onChanged.
+// Hydrate Canvas + LeetCode state from local storage, then keep both
+// live via onChanged.
 (async () => {
   const { leetcodeAuth, canvasAuth } = await chrome.storage.local.get([
     "leetcodeAuth",
     "canvasAuth",
   ]);
   renderLeetcodeState(leetcodeAuth);
-  applyCanvasAuth(canvasAuth);
+  renderCanvasState(canvasAuth);
+  if (canvasAuth?.signedIn && canvasAuth.netID) {
+    await maybePrefillProfile(canvasAuth.netID);
+  }
 })();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -152,37 +161,70 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     renderLeetcodeState(changes.leetcodeAuth.newValue);
   }
   if (changes.canvasAuth) {
-    applyCanvasAuth(changes.canvasAuth.newValue);
+    const next = changes.canvasAuth.newValue;
+    renderCanvasState(next);
+    if (next?.signedIn && next.netID) {
+      maybePrefillProfile(next.netID);
+    }
   }
+});
+
+// ---- Step 1: Canvas-state buttons --------------------------------------
+
+openCanvasBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://byu.instructure.com/", active: true });
+});
+
+canvasRecheckBtn.addEventListener("click", async () => {
+  const tabs = await chrome.tabs.query({ url: "https://byu.instructure.com/*" });
+  if (tabs.length === 0) {
+    chrome.tabs.create({ url: "https://byu.instructure.com/", active: true });
+    return;
+  }
+  await chrome.tabs.reload(tabs[0].id);
+  step1Status.textContent = "Re-checking Canvas…";
+  step1Status.className = "onboard-status";
+});
+
+canvasSwitchBtn.addEventListener("click", () => {
+  // Open Canvas — student signs out and back in there. Our content
+  // script picks up the new session and the card updates automatically.
+  chrome.tabs.create({ url: "https://byu.instructure.com/logout", active: true });
 });
 
 // ---- Step 1 submit -----------------------------------------------------
 
 step1Form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const netID = netidInput.value.trim().toLowerCase();
-  const studentID = normalizeStudentId(studentIdInput.value);
+
+  // Gate on Canvas state — UI hides the form when not signed in, but
+  // defend against race conditions where the form is visible briefly.
+  if (
+    !currentCanvasAuth?.signedIn ||
+    !NETID_REGEX.test(currentCanvasAuth.netID ?? "") ||
+    !currentCanvasAuth.ltiUserId
+  ) {
+    step1Status.textContent =
+      "Canvas session not detected. Sign in to Canvas first, then try again.";
+    step1Status.className = "onboard-status error";
+    return;
+  }
+
+  const netID = currentCanvasAuth.netID;
+  const ltiUserId = currentCanvasAuth.ltiUserId;
+  const canvasUserId = currentCanvasAuth.canvasUserId ?? null;
   const name = nameInput.value.trim();
   const note = noteInput.value.trim();
-
-  if (!NETID_REGEX.test(netID)) {
-    step1Status.textContent = "That doesn't look like a valid netID.";
-    step1Status.className = "onboard-status error";
-    return;
-  }
-  if (!STUDENT_ID_DIGITS_REGEX.test(studentID)) {
-    step1Status.textContent = "Student ID should be 9 digits (e.g. 12-345-6789).";
-    step1Status.className = "onboard-status error";
-    return;
-  }
 
   step1Status.textContent = "Saving…";
   step1Status.className = "onboard-status";
   try {
-    // netID + studentID stay local (sync storage). studentID is a "soft
-    // secret" used by the eventual Cloud Function for identity
-    // verification; it doesn't belong in any public student doc.
-    await chrome.storage.sync.set({ netID, studentID });
+    // netID + ltiUserId stay in chrome.storage.sync. Phase 2's Cloud
+    // Function will read them to verify identity against Canvas via the
+    // instructor's API token — neither field belongs on the public
+    // student doc.
+    await chrome.storage.sync.set({ netID, ltiUserId, canvasUserId });
+
     const fields = {};
     if (name) fields.name = name;
     if (note) fields.note = note;
@@ -204,8 +246,6 @@ openLeetcodeBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: "https://leetcode.com/", active: true });
 });
 
-// Force the auth content script to re-run by reloading any open leetcode
-// tab. If none is open, open one — same as "Open leetcode.com".
 recheckBtn.addEventListener("click", async () => {
   const tabs = await chrome.tabs.query({ url: "https://leetcode.com/*" });
   if (tabs.length === 0) {
@@ -218,8 +258,6 @@ recheckBtn.addEventListener("click", async () => {
 });
 
 switchAccountBtn.addEventListener("click", () => {
-  // Sign them out so they can sign in with a different account. LeetCode
-  // redirects to the login page after logout.
   chrome.tabs.create({
     url: "https://leetcode.com/accounts/logout/",
     active: true,
