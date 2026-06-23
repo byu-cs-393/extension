@@ -93,9 +93,25 @@ async function fetchRecentAcceptedSubmissions(username, limit = 20) {
 
 // ---- Firestore helpers (inlined; content scripts can't import) --------
 
+// Read the current Firebase Auth ID token from chrome.storage.local.
+// Same constraint as leetcode-tracker.js: content scripts can't import
+// auth.js, so we just use the cached value. The dashboard/popup keep
+// it fresh via auth.js's refresh logic.
+async function getStoredFirebaseIdToken() {
+  const { firebaseAuth } = await chrome.storage.local.get("firebaseAuth");
+  return firebaseAuth?.idToken ?? null;
+}
+
+async function authedHeaders(extra = {}) {
+  const idToken = await getStoredFirebaseIdToken();
+  const headers = { ...extra };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+  return headers;
+}
+
 async function fetchSolvedProblemsFromFirestore(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: await authedHeaders() });
   if (response.status === 404) return {};
   if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
   const data = await response.json();
@@ -122,7 +138,7 @@ async function writeSolvedProblemsToFirestore(netID, solves) {
   };
   const response = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: await authedHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) {

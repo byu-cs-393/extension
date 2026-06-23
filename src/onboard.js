@@ -1,4 +1,5 @@
 import { fetchStudent, updateStudent } from "./firestore.js";
+import { signIn } from "./auth.js";
 
 // Two-step wizard:
 //   Step 1 — Canvas identity: requires an active BYU Canvas session.
@@ -216,13 +217,17 @@ step1Form.addEventListener("submit", async (event) => {
   const name = nameInput.value.trim();
   const note = noteInput.value.trim();
 
-  step1Status.textContent = "Saving…";
+  step1Status.textContent = "Verifying with BYU…";
   step1Status.className = "onboard-status";
   try {
-    // netID + ltiUserId stay in chrome.storage.sync. Phase 2's Cloud
-    // Function will read them to verify identity against Canvas via the
-    // instructor's API token — neither field belongs on the public
-    // student doc.
+    // Run the Firebase signin chain BEFORE writing to Firestore:
+    //   Google OIDC (@byu.edu) → verifyStudent → Firebase custom token
+    //   → signInWithCustomToken → cached Firebase ID token.
+    // Subsequent Firestore writes (and later, per-user rules) rely on
+    // that token being available.
+    await signIn(netID, ltiUserId);
+
+    step1Status.textContent = "Saving…";
     await chrome.storage.sync.set({ netID, ltiUserId, canvasUserId });
 
     const fields = {};

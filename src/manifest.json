@@ -11,7 +11,10 @@
   "host_permissions": [
     "https://firestore.googleapis.com/*",
     "https://leetcode.com/*",
-    "https://byu.instructure.com/*"
+    "https://byu.instructure.com/*",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://cs393-496021.web.app/*"
   ],
   "background": {
     "service_worker": "background.js"

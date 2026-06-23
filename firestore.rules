@@ -1,27 +1,28 @@
 // CS 393 Buddy — Firestore security rules.
 //
-// CAVEAT: these are schema-only rules. They restrict allowed paths,
-// validate document shape, and enforce a few key field constraints, but
-// they do NOT enforce per-user authorization — every Firestore REST
-// call the extension makes is unauthenticated (project API key only,
-// no Firebase Auth token). Anyone running the extension can write to
-// any student's doc if they know the netID. Real per-user
-// authorization needs Firebase Auth, which is a separate, larger track.
+// Per-user authorization via Firebase Auth. The extension signs in via
+// our verifyStudent Cloud Function (which itself verifies identity
+// against Canvas using the instructor's API token), receives a custom
+// token with uid == netID, and exchanges it for a Firebase Auth ID
+// token via signInWithCustomToken. Every Firestore REST call sends
+// that ID token as Authorization: Bearer, and these rules enforce
+// request.auth.uid against the document path.
 //
-// What these rules DO defend against:
-//   - Typos that would create docs at unexpected paths
-//   - Corrupt or compromised clients writing garbage shapes
-//   - Accidental data spillage into unexpected fields
-//   - Random deletion / mutation of activity events (which should be
-//     append-only)
+// What this blocks vs. the previous schema-only rules:
+//   - Anonymous writes (no Firebase Auth ID token in Authorization)
+//   - Cross-student impersonation (auth.uid must match the netID in
+//     the doc path or studentNetID field)
+//   - Garbage shapes (the existing schema validations carry over)
+//
+// What's still open (TODO):
+//   - classes/{classId} writes are allowed for any authed user. Once
+//     there's an admin UI or Cloud Function doing seeding, restrict
+//     to a specific principal.
 //
 // How to deploy:
-//   1. Open https://console.firebase.google.com/project/cs393-496021/firestore/rules
-//   2. Replace the editor contents with this file's contents
-//   3. Click Publish
-//
-// Keep this file in sync with the rules deployed to the Console — it's
-// the version-controlled source of truth.
+//   firebase deploy --only firestore:rules
+// (or paste this file's contents into the Firebase Console rules
+// editor and Publish.)
 
 rules_version = '2';
 
@@ -29,12 +30,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ---- students/{netID} ----------------------------------------------
-    // Student profile + denormalized solved-during-class state. Written
-    // by onboarding (name/note/leetcodeUsername) and by leetcode-tracker.js
-    // (solvedProblems map). Read by dashboard, popup, tracker, backstop.
+    // Each student can only read and write their own doc. Schema is
+    // also validated.
     match /students/{netID} {
-      allow read: if true;
-      allow write: if isValidNetID(netID) && isValidStudentDoc(request.resource.data);
+      allow read: if request.auth != null && request.auth.uid == netID;
+      allow write: if request.auth != null
+                    && request.auth.uid == netID
+                    && isValidNetID(netID)
+                    && isValidStudentDoc(request.resource.data);
     }
 
     function isValidNetID(netID) {
@@ -48,11 +51,14 @@ service cloud.firestore {
     }
 
     // ---- activity/{eventId} --------------------------------------------
-    // Append-only event log written by leetcode-tracker.js.
-    // open_problem / submit_pass / submit_fail events.
+    // Append-only event log. Only the authenticated student can write
+    // events tagged with their own netID, and only via create (never
+    // update/delete).
     match /activity/{eventId} {
-      allow read: if true;
-      allow create: if isValidActivityEvent(request.resource.data);
+      allow read: if false;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.studentNetID
+                    && isValidActivityEvent(request.resource.data);
       allow update, delete: if false;
     }
 
@@ -68,21 +74,20 @@ service cloud.firestore {
     }
 
     // ---- classes/{classId} ---------------------------------------------
-    // Class-level config doc. Currently open for the legacy auto-seed
-    // path; tighten when there's a Cloud Function / admin UI doing seeds.
+    // Class-level config. Readable by any authenticated student.
+    // Writes still open for the auto-seed path; tighten later when
+    // there's a Cloud Function / admin UI doing the seeding.
     match /classes/{classId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
 
     // ---- classes/{classId}/weeks/{weekNum} -----------------------------
-    // Per-week assignment definitions: { weekNum, startDate, endDate,
-    // problems: [{slug, title, difficulty}, ...] }. Auto-seeded by
-    // recommended.js on first run; edited by the instructor (and
-    // eventually a TA admin UI) for the real semester.
+    // Per-week assignment definitions. Readable by any authed student;
+    // writes still open for auto-seed (same TODO as above).
     match /classes/{classId}/weeks/{weekNum} {
-      allow read: if true;
-      allow write: if isValidWeekDoc(request.resource.data);
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && isValidWeekDoc(request.resource.data);
     }
 
     function isValidWeekDoc(data) {
@@ -96,8 +101,6 @@ service cloud.firestore {
     }
 
     // ---- Default: deny --------------------------------------------------
-    // Firestore is already deny-by-default for unmatched paths; this
-    // explicit catch-all just makes intent obvious.
     match /{document=**} {
       allow read, write: if false;
     }

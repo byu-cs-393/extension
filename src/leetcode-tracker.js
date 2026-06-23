@@ -61,11 +61,29 @@ function encodeFirestoreFields(obj) {
   return result;
 }
 
+// Read the current Firebase Auth ID token from chrome.storage.local.
+// Content scripts can't import auth.js (no ES module imports), so we
+// just read the cached value. The dashboard/popup keep it fresh via
+// auth.js's refresh logic; if it's expired here, Firestore returns
+// 401 and the call fails (worst case: a single solve doesn't sync
+// until the dashboard refreshes the token next time it loads).
+async function getStoredFirebaseIdToken() {
+  const { firebaseAuth } = await chrome.storage.local.get("firebaseAuth");
+  return firebaseAuth?.idToken ?? null;
+}
+
+async function authedHeaders(extra = {}) {
+  const idToken = await getStoredFirebaseIdToken();
+  const headers = { ...extra };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+  return headers;
+}
+
 async function postActivityEvent(fields) {
   const url = `${FIRESTORE_BASE}/activity?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authedHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       fields: encodeFirestoreFields({
         studentNetID: netID,
@@ -160,7 +178,7 @@ async function markSolved(slug) {
 // yet) and legacy array shape from the previous schema.
 async function fetchSolvedProblemsFromFirestore(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: await authedHeaders() });
   if (response.status === 404) return {};
   if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
   const data = await response.json();
@@ -192,7 +210,7 @@ async function writeSolvedProblemsToFirestore(netID, solves) {
   };
   const response = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: await authedHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) {

@@ -14,5 +14,22 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/verifyStudent",
+        "run": {
+          "serviceId": "verifystudent",
+          "region": "us-central1"
+        }
+      }
+    ]
+  }
 }

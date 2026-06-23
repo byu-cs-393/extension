@@ -1,3 +1,4 @@
 .claude/settings.local.json
 *.m4a
 transcript-raw.txt
+.firebase/

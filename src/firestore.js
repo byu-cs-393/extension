@@ -1,18 +1,30 @@
 // Thin wrapper around Firestore's REST API. Shared by dashboard.js and
-// onboard.js. The LeetCode content script can't use module imports
-// (MV3 content script limitation), so it inlines its own copy of these
-// helpers.
+// onboard.js. The LeetCode content scripts can't use module imports
+// (MV3 content script limitation), so they inline their own copies of
+// these helpers.
 import { firebaseConfig } from "./firebase-config.js";
+import { getIdToken } from "./auth.js";
 
 const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
   `/databases/(default)/documents`;
 
+// All Firestore calls go through this so they pick up the current
+// Firebase Auth ID token from auth.js (which transparently refreshes
+// when near expiry). Firestore rules then enforce request.auth.uid
+// for per-user access.
+async function authedFetch(url, options = {}) {
+  const idToken = await getIdToken();
+  const headers = { ...(options.headers ?? {}) };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+  return fetch(url, { ...options, headers });
+}
+
 // Generic GET for any Firestore doc. Returns parsed fields object or
 // null on 404.
 export async function fetchDoc(path) {
   const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
+  const response = await authedFetch(url);
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
@@ -21,14 +33,10 @@ export async function fetchDoc(path) {
   return parseFirestoreFields(data.fields);
 }
 
-// Generic LIST for any Firestore collection or subcollection. Returns
-// an array of parsed docs (in Firestore's default order — server-side
-// for top-level, document-name order for subcollections). Does not
-// handle pagination; for the small classes/{cs393}/weeks scale we care
-// about, the default page size (~100) is plenty.
+// Generic LIST for any Firestore collection or subcollection.
 export async function fetchCollection(path) {
   const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
+  const response = await authedFetch(url);
   if (response.status === 404) return [];
   if (!response.ok) {
     throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
@@ -44,7 +52,7 @@ export async function patchDoc(path, fields) {
     .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
     .join("&");
   const url = `${FIRESTORE_BASE}/${path}?${mask}&key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url, {
+  const response = await authedFetch(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fields: encodeFirestoreFields(fields) }),
@@ -58,33 +66,12 @@ export async function patchDoc(path, fields) {
 
 // Returns the parsed student doc, or null if it doesn't exist yet.
 export async function fetchStudent(netID) {
-  const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url);
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
-  }
-  const data = await response.json();
-  return parseFirestoreFields(data.fields);
+  return fetchDoc(`students/${netID}`);
 }
 
-// PATCH with updateMask only touches the listed fields, leaving the
-// rest alone. Creates the document if it doesn't exist yet.
+// PATCH the student doc with the given fields (updateMask semantics).
 export async function updateStudent(netID, fields) {
-  const mask = Object.keys(fields)
-    .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
-    .join("&");
-  const url = `${FIRESTORE_BASE}/students/${netID}?${mask}&key=${firebaseConfig.apiKey}`;
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fields: encodeFirestoreFields(fields) }),
-  });
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Firestore PATCH ${response.status}: ${errorBody}`);
-  }
-  return response.json();
+  return patchDoc(`students/${netID}`, fields);
 }
 
 // Firestore REST wraps each field value in a type tag, e.g.
