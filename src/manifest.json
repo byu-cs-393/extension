@@ -7,7 +7,7 @@
     "default_popup": "popup.html",
     "default_title": "CS 393 Buddy"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://firestore.googleapis.com/*",
     "https://leetcode.com/*",
@@ -17,7 +17,8 @@
     "https://cs393-496021.web.app/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {

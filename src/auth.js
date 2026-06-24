@@ -140,3 +140,20 @@ export async function getIdToken() {
 export async function signOut() {
   await chrome.storage.local.remove("firebaseAuth");
 }
+
+// Unconditionally swap the cached ID token for a fresh one. Used by
+// the background service worker's periodic refresh — it can't rely on
+// the buffer-based check in getIdToken because the alarm may fire
+// while the token is still "fresh enough" by that test.
+export async function forceRefresh() {
+  const { firebaseAuth } = await chrome.storage.local.get("firebaseAuth");
+  if (!firebaseAuth?.refreshToken) return null;
+  try {
+    const refreshed = await refreshTokens(firebaseAuth.refreshToken);
+    await storeTokens(refreshed);
+    return refreshed.idToken;
+  } catch (error) {
+    console.error("[CS 393 Buddy] forced refresh failed:", error);
+    return null;
+  }
+}

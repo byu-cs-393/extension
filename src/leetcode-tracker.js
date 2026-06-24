@@ -222,24 +222,58 @@ async function writeSolvedProblemsToFirestore(netID, solves) {
 
 // ---- verdict detection --------------------------------------------------
 
-// A real submission result panel always renders companion text like
-// "testcases passed" and "submitted at" that doesn't appear in status
-// badges, tab labels, or the "X/Y solved" stats UI. The Runtime/Memory
-// labels run on without spaces in LeetCode's React output (e.g.
-// "Runtime0msBeats100.00%Memory") so we match those by label-then-digit
-// rather than relying on word boundaries.
+// A real Accepted result panel always renders companion text like
+// "testcases passed" / "submitted at" / "Runtime 0 ms" / "Memory ..MB"
+// that doesn't appear in the persistent "Solved" tab badge. We use
+// that anchor only for Accepted, because that's the verdict with the
+// noisy persistent indicator. For failure verdicts (Wrong Answer,
+// TLE, etc.) we use a different filter: only count them when they
+// follow a recent click on the Submit button — that's what
+// distinguishes a real submission from a Run.
 const RESULT_PANEL_KEYWORDS =
   /(testcases passed|submitted at|Submission Detail|Runtime\s*\d|Memory\s*\d)/i;
 const ANCESTOR_SEARCH_DEPTH = 6;
 
+// Listen for clicks on LeetCode's Submit button. Run and Submit
+// render the same verdict text in the DOM, so click-tracking is the
+// only reliable way to tell them apart without parsing network
+// requests. Window is generous: even slow problems should return
+// within a minute.
+let lastSubmitClickAt = 0;
+const SUBMIT_VERDICT_WINDOW_MS = 60_000;
+
+document.addEventListener(
+  "click",
+  (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button") : null;
+    if (!button) return;
+    const text = (button.textContent ?? "").trim();
+    if (text === "Submit") {
+      lastSubmitClickAt = Date.now();
+    }
+  },
+  true,
+);
+
 // Walk visible spans/divs looking for an element whose trimmed text is
-// exactly one of our known verdicts AND whose ancestor chain contains
-// submission-result keywords. Returns the verdict string or null.
+// exactly one of our known verdicts.
+//   - "Accepted": require an ancestor with submission-result keywords
+//     (filters out the persistent "Solved" tab badge).
+//   - Other verdicts: require a Submit-button click within the last
+//     SUBMIT_VERDICT_WINDOW_MS (filters out Run results and stale
+//     entries in the submissions panel).
 function findVerdictInDOM() {
   const candidates = document.querySelectorAll("span, div");
   for (const el of candidates) {
     const text = el.textContent?.trim();
     if (!text || !VERDICTS[text]) continue;
+
+    if (text !== "Accepted") {
+      if (Date.now() - lastSubmitClickAt < SUBMIT_VERDICT_WINDOW_MS) {
+        return text;
+      }
+      continue;
+    }
 
     let parent = el.parentElement;
     let depth = 0;
