@@ -29,6 +29,13 @@
           "serviceId": "verifystudent",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/dryRunGrades",
+        "run": {
+          "serviceId": "dryrungrades",
+          "region": "us-central1"
+        }
       }
     ]
   }

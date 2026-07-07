@@ -79,6 +79,13 @@ export async function refreshWeeks() {
         startDate: d.startDate,
         endDate: d.endDate,
         problems: d.problems,
+        // Optional discriminated map describing the week's third card.
+        // Exactly one of:
+        //   { type: "topicExam", topic, durationMin, examType? }
+        //   { type: "onlineAssessment", topic, attempts: [...] }
+        //   { type: "mockInterview", durationMin }
+        // See src/third-card.js for rendering and progress shapes.
+        thirdCard: d.thirdCard ?? null,
       }));
 
     if (weeks.length === 0) {

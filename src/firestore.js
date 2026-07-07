@@ -45,6 +45,18 @@ export async function fetchCollection(path) {
   return (data.documents ?? []).map((doc) => parseFirestoreFields(doc.fields));
 }
 
+// Generic DELETE for any Firestore doc. Treats 404 as success (already
+// gone), so callers can call this idempotently.
+export async function deleteDoc(path) {
+  const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
+  const response = await authedFetch(url, { method: "DELETE" });
+  if (response.status === 404) return;
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Firestore DELETE ${response.status}: ${errorBody}`);
+  }
+}
+
 // Generic PATCH for any Firestore doc. Uses updateMask so only the
 // named fields are touched; creates the doc if it doesn't exist yet.
 export async function patchDoc(path, fields) {
@@ -108,6 +120,7 @@ function encodeFirestoreFields(obj) {
 }
 
 function encodeFirestoreValue(value) {
+  if (value === null) return { nullValue: null };
   if (typeof value === "string") return { stringValue: value };
   if (typeof value === "number") return { doubleValue: value };
   if (typeof value === "boolean") return { booleanValue: value };
@@ -115,7 +128,7 @@ function encodeFirestoreValue(value) {
   if (Array.isArray(value)) {
     return { arrayValue: { values: value.map(encodeFirestoreValue) } };
   }
-  if (typeof value === "object" && value !== null) {
+  if (typeof value === "object") {
     return { mapValue: { fields: encodeFirestoreFields(value) } };
   }
   throw new Error(`Unsupported field value type: ${typeof value}`);

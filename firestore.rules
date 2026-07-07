@@ -85,19 +85,73 @@ service cloud.firestore {
     // ---- classes/{classId}/weeks/{weekNum} -----------------------------
     // Per-week assignment definitions. Readable by any authed student;
     // writes still open for auto-seed (same TODO as above).
+    //
+    // `thirdCard` is an optional discriminated map describing the
+    // week's third assignment slot. Exactly one of:
+    //   { type: 'topicExam', topic, durationMin, examType? }
+    //   { type: 'onlineAssessment', topic, attempts }
+    //   { type: 'mockInterview', durationMin }
+    // The rules validate `type` against the known set but trust the
+    // client for deeper per-type shape (Firestore rules can't ergonomically
+    // express a discriminated union).
     match /classes/{classId}/weeks/{weekNum} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && isValidWeekDoc(request.resource.data);
+      allow create, update: if request.auth != null
+                             && isValidWeekDoc(request.resource.data);
+      allow delete: if request.auth != null;
     }
 
     function isValidWeekDoc(data) {
       return data.keys().hasAll(['weekNum', 'startDate', 'endDate', 'problems'])
-          && data.keys().hasOnly(['weekNum', 'startDate', 'endDate', 'problems'])
+          && data.keys().hasOnly(['weekNum', 'startDate', 'endDate', 'problems', 'thirdCard'])
           && data.weekNum is number
           && data.startDate is number
           && data.endDate is number
           && data.endDate > data.startDate
-          && data.problems is list;
+          && data.problems is list
+          && (!('thirdCard' in data) || data.thirdCard == null || isValidThirdCard(data.thirdCard));
+    }
+
+    function isValidThirdCard(card) {
+      return card is map
+          && 'type' in card
+          && card.type in ['topicExam', 'onlineAssessment', 'mockInterview'];
+    }
+
+    // ---- students/{netID}/weekProgress/{weekNum} -----------------------
+    // Per-student progress on the week's third card. One doc per
+    // (student, week) pair. Shape mirrors the catalog's `thirdCard.type`:
+    //   topicExam        → { type, status, requestedAt?, ... }
+    //   onlineAssessment → { type, currentAttempt, attempts[], finalStatus }
+    //   mockInterview    → { type, status, partnerNetID?, ... }
+    // Only the owning student can read or write their own progress.
+    //
+    // Delete is split out because request.resource.data is null on
+    // delete — running it through the schema validator would always
+    // fail. Useful for reset/test flows during development.
+    match /students/{netID}/weekProgress/{weekNum} {
+      allow read: if request.auth != null && request.auth.uid == netID;
+      allow create, update: if request.auth != null
+                             && request.auth.uid == netID
+                             && isValidWeekProgress(request.resource.data, weekNum);
+      allow delete: if request.auth != null && request.auth.uid == netID;
+    }
+
+    function isValidWeekProgress(data, weekNum) {
+      return 'type' in data
+          && data.type in ['topicExam', 'onlineAssessment', 'mockInterview']
+          && 'weekNum' in data
+          && data.weekNum is number
+          && string(int(data.weekNum)) == weekNum;
+    }
+
+    // ---- gradeSyncLog/{runId} ------------------------------------------
+    // Write-only from the Cloud Function via Admin SDK (rules bypassed);
+    // read access from the instructor allowlist. Keep the allowlist in
+    // sync with INSTRUCTOR_ALLOWLIST in functions/index.js.
+    match /gradeSyncLog/{runId} {
+      allow read: if request.auth != null && request.auth.uid == 'jack684';
+      allow write: if false;
     }
 
     // ---- Default: deny --------------------------------------------------

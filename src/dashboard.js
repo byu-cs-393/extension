@@ -5,11 +5,29 @@ import {
   classifyWeek,
   solvedSlugsInWeek,
 } from "./recommended.js";
+import {
+  createThirdCardSection,
+  getCachedProgress,
+  refreshProgress,
+} from "./third-card.js";
+import {
+  getActive,
+  getRemainingMs,
+  formatRemaining,
+  endActiveAttempt,
+  solvedInWindow,
+  attemptPassed,
+  OA_SESSION_KEY,
+} from "./oa-session.js";
 
 // Module-scoped state — render() reads from these. Two paths update
 // them: chrome.storage.onChanged (live), or the bootstrap (initial).
 let currentWeeks = [];
 let currentSolves = null;
+let currentProgress = {}; // { [weekNum]: progressDoc }
+let currentActiveOa = null; // active OA session, or null
+let currentNetID = null;
+let timerInterval = null;
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -115,6 +133,18 @@ function createWeekSection(week, status) {
   section.appendChild(header);
 
   section.appendChild(createRecommendedCard(week, status));
+  const thirdCardEl = createThirdCardSection(
+    week.thirdCard,
+    currentProgress?.[week.weekNum] ?? null,
+    status,
+    {
+      weekNum: week.weekNum,
+      netID: currentNetID,
+      activeSession: currentActiveOa,
+      solves: currentSolves?.solves ?? {},
+    }
+  );
+  if (thirdCardEl) section.appendChild(thirdCardEl);
   return section;
 }
 
@@ -240,13 +270,21 @@ function createProblemItem(p, isSolved) {
 // ---- Bootstrap + storage listener -------------------------------------
 
 async function initWeeks(netID) {
+  currentNetID = netID;
   currentWeeks = await getWeeks();
   const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
   currentSolves = solvedProblems ?? null;
+  currentProgress = await getCachedProgress();
+  currentActiveOa = await getActive();
   renderWeeks();
+  startTimerLoop();
 
   // Background weeks refresh — pulls Firestore, auto-seeds if empty.
   refreshWeeks();
+
+  // Background third-card progress refresh — storage.onChanged fires
+  // re-render when the bundle lands.
+  refreshProgress(netID);
 
   // Background student-doc refresh — pulls Firestore, writes to cache,
   // storage.onChanged fires re-render.
@@ -262,12 +300,57 @@ async function initWeeks(netID) {
   }
 }
 
+// One-second tick that surgically updates the active OA timer text and
+// auto-ends the attempt when time hits zero. Only runs while there's a
+// TIMED active session (attempt 1); untimed attempts (attempts 2 and 3,
+// open-window model) don't need a tick — the card just shows "in
+// progress" and waits for the student to click Submit.
+function startTimerLoop() {
+  stopTimerLoop();
+  if (!currentActiveOa || currentActiveOa.deadlineMs == null) return;
+  timerInterval = setInterval(async () => {
+    const session = currentActiveOa;
+    if (!session) {
+      stopTimerLoop();
+      return;
+    }
+    const remaining = getRemainingMs(session);
+    const timerEl = document.querySelector(
+      `[data-oa-timer="${session.weekNum}"]`
+    );
+    if (timerEl) {
+      timerEl.textContent = "⏱ " + formatRemaining(remaining);
+    }
+    if (remaining !== null && remaining <= 0) {
+      stopTimerLoop();
+      const week = currentWeeks.find((w) => w.weekNum === session.weekNum);
+      const oa = week?.thirdCard;
+      await endActiveAttempt({
+        netID: currentNetID,
+        existingProgress: currentProgress?.[session.weekNum] ?? null,
+        attemptSpec: oa?.attempts?.[session.attemptIndex] ?? null,
+        totalAttempts: oa?.attempts?.length ?? 0,
+        solves: currentSolves?.solves ?? {},
+        reason: "timer",
+      });
+    }
+  }, 1000);
+}
+
+function stopTimerLoop() {
+  if (timerInterval != null) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   let needsRender = false;
   if (changes.solvedProblems) {
     currentSolves = changes.solvedProblems.newValue ?? null;
     needsRender = true;
+    maybeAutoPass();
   }
   if (changes.weeksCatalog) {
     const next = changes.weeksCatalog.newValue?.weeks;
@@ -276,8 +359,52 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       needsRender = true;
     }
   }
+  if (changes.weekProgressBundle) {
+    currentProgress = changes.weekProgressBundle.newValue?.progress ?? {};
+    needsRender = true;
+  }
+  if (changes[OA_SESSION_KEY]) {
+    currentActiveOa = changes[OA_SESSION_KEY].newValue ?? null;
+    // endActiveAttempt updates the local progress cache before clearing
+    // the session, so there's no need to re-fetch here — the
+    // weekProgressBundle change will land alongside this one.
+    startTimerLoop();
+    needsRender = true;
+  }
   if (needsRender) renderWeeks();
 });
+
+// Fires whenever solvedProblems changes. If there's an active OA and
+// the fresh solve count meets the pass threshold, auto-end the attempt
+// as passed so the student doesn't have to click Submit. endActiveAttempt
+// re-evaluates against a fresh Firestore fetch on its own, so the local
+// evaluation here is just the "should we even try" gate.
+async function maybeAutoPass() {
+  const session = currentActiveOa;
+  if (!session) return;
+  const week = currentWeeks.find((w) => w.weekNum === session.weekNum);
+  const attempt = week?.thirdCard?.attempts?.[session.attemptIndex];
+  if (!attempt) return;
+  const solved = solvedInWindow(
+    attempt,
+    currentSolves?.solves ?? {},
+    session.startedAt,
+    Date.now()
+  );
+  if (!attemptPassed(attempt, solved.length)) return;
+  try {
+    await endActiveAttempt({
+      netID: currentNetID,
+      existingProgress: currentProgress?.[session.weekNum] ?? null,
+      attemptSpec: attempt,
+      totalAttempts: week.thirdCard.attempts.length,
+      solves: currentSolves?.solves ?? {},
+      reason: "autopass",
+    });
+  } catch (error) {
+    console.error("[CS 393 Buddy] auto-pass failed:", error);
+  }
+}
 
 // ---- Profile menu ------------------------------------------------------
 

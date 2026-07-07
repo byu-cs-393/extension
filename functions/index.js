@@ -22,6 +22,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
+const { getFirestore } = require("firebase-admin/firestore");
 
 initializeApp();
 
@@ -107,5 +108,220 @@ exports.verifyStudent = onRequest(
 
     const customToken = await getAuth().createCustomToken(netID);
     res.status(200).json({ token: customToken });
+  }
+);
+
+// ---- dryRunGrades ------------------------------------------------------
+//
+// Phase 1 of Canvas grade sync: computes what every enrolled student's
+// grade WOULD be, based on Firestore data, and writes the result to
+// `gradeSyncLog/{runId}`. Does NOT talk to Canvas. Use this to sanity-
+// check the rubric against manually-computed grades before we wire up
+// real Canvas writes.
+//
+// Auth: caller must present a Firebase ID token whose uid is in
+// INSTRUCTOR_ALLOWLIST below. Same allowlist must be duplicated in
+// firestore.rules for `gradeSyncLog` read access — if you edit one,
+// edit the other.
+//
+// Input: POST with empty body (nothing to configure yet).
+//
+// Success response:
+//   { runId, studentsProcessed, weeksProcessed, warningsCount,
+//     warnings: [...first 20], logPath }
+//
+// Grade computation per (student, week):
+//   - recommended: count solves of any week.problems slug whose
+//     timestamp falls in [startDate, endDate)
+//   - thirdCard (if present): 0 or 1 based on progress doc:
+//        topicExam        → progress.status === "passed"
+//        onlineAssessment → progress.finalStatus === "passed"
+//        mockInterview    → progress.status === "completed"
+
+const CLASS_ID = "cs393";
+const INSTRUCTOR_ALLOWLIST = ["jack684"]; // keep in sync with firestore.rules
+
+exports.dryRunGrades = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // ---- Auth check ----
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    if (!INSTRUCTOR_ALLOWLIST.includes(decoded.uid)) {
+      res.status(403).json({
+        error: `${decoded.uid} is not on the instructor allowlist.`,
+        code: "permission-denied",
+      });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const db = getFirestore();
+
+    // ---- Fetch weeks + students in parallel ----
+    const [weeksSnap, studentsSnap] = await Promise.all([
+      db.collection(`classes/${CLASS_ID}/weeks`).get(),
+      db.collection("students").get(),
+    ]);
+
+    const now = Date.now();
+    const weeks = weeksSnap.docs
+      .map((d) => d.data())
+      .filter((w) => Number.isFinite(w?.startDate) && w.startDate <= now)
+      .sort((a, b) => a.weekNum - b.weekNum);
+
+    // ---- Fetch each student's weekProgress in parallel ----
+    const progressByStudent = {};
+    await Promise.all(
+      studentsSnap.docs.map(async (doc) => {
+        const netID = doc.id;
+        const snap = await db.collection(`students/${netID}/weekProgress`).get();
+        const byWeek = {};
+        for (const p of snap.docs) {
+          const data = p.data();
+          if (Number.isFinite(data?.weekNum)) {
+            byWeek[data.weekNum] = data;
+          }
+        }
+        progressByStudent[netID] = byWeek;
+      })
+    );
+
+    // ---- Compute grades ----
+    const warnings = [];
+    const results = {}; // netID -> weekNum -> row
+    const flatRows = [];
+
+    for (const studentDoc of studentsSnap.docs) {
+      const netID = studentDoc.id;
+      const student = studentDoc.data();
+      const solves =
+        student?.solvedProblems && typeof student.solvedProblems === "object"
+          ? student.solvedProblems
+          : {};
+      const progressByWeek = progressByStudent[netID] ?? {};
+      results[netID] = {};
+
+      for (const week of weeks) {
+        const weekNum = week.weekNum;
+        const problems = Array.isArray(week.problems) ? week.problems : [];
+        if (problems.length === 0) {
+          warnings.push(`Week ${weekNum} has no problems array`);
+        }
+
+        // Recommended: count solves of listed problems whose timestamp
+        // falls in [startDate, endDate). endDate is exclusive per the
+        // week-doc contract.
+        const recSolved = problems.filter((p) => {
+          const ts = solves[p?.slug];
+          return (
+            typeof ts === "number" &&
+            ts >= week.startDate &&
+            ts < week.endDate
+          );
+        }).length;
+        const recTotal = problems.length;
+
+        // Third card (optional)
+        let thirdCard = null;
+        if (week.thirdCard && week.thirdCard.type) {
+          const type = week.thirdCard.type;
+          const progress = progressByWeek[weekNum];
+          let earned = 0;
+          if (progress) {
+            if (type === "topicExam" && progress.status === "passed") earned = 1;
+            else if (type === "onlineAssessment" && progress.finalStatus === "passed") earned = 1;
+            else if (type === "mockInterview" && progress.status === "completed") earned = 1;
+            else if (
+              type !== "topicExam" &&
+              type !== "onlineAssessment" &&
+              type !== "mockInterview"
+            ) {
+              warnings.push(`Unknown thirdCard type "${type}" on week ${weekNum}`);
+            }
+          }
+          thirdCard = { type, earned, total: 1 };
+        }
+
+        const row = {
+          recSolved,
+          recTotal,
+          thirdCard,
+        };
+        results[netID][weekNum] = row;
+
+        // Flat rows: one per Canvas gradebook column. Recommended
+        // always emits a row; thirdCard emits a row only if the week
+        // has one. Each carries the intent shape Phase 2 will use.
+        flatRows.push({
+          netID,
+          weekNum,
+          category: "recommended",
+          points: recSolved,
+          maxPoints: recTotal,
+          wouldPush: {
+            canvasAssignmentId: week.canvasAssignmentId ?? null,
+            points: recSolved,
+            maxPoints: recTotal,
+          },
+        });
+        if (thirdCard) {
+          flatRows.push({
+            netID,
+            weekNum,
+            category: "thirdCard",
+            subtype: thirdCard.type,
+            points: thirdCard.earned,
+            maxPoints: thirdCard.total,
+            wouldPush: {
+              canvasAssignmentId: week.thirdCard.canvasAssignmentId ?? null,
+              points: thirdCard.earned,
+              maxPoints: thirdCard.total,
+            },
+          });
+        }
+      }
+    }
+
+    // ---- Write the log doc ----
+    // Doc ID keeps the ISO timestamp so runs sort naturally in the
+    // Firestore console. Colons → dashes because URLs and paths.
+    const runId = `dryRun-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+    const finishedAt = Date.now();
+    await db.doc(`gradeSyncLog/${runId}`).set({
+      startedAt,
+      finishedAt,
+      triggeredBy: decoded.uid,
+      classId: CLASS_ID,
+      studentsProcessed: studentsSnap.size,
+      weeksProcessed: weeks.length,
+      results,
+      flatRows,
+      warnings,
+    });
+
+    res.status(200).json({
+      runId,
+      logPath: `gradeSyncLog/${runId}`,
+      studentsProcessed: studentsSnap.size,
+      weeksProcessed: weeks.length,
+      warningsCount: warnings.length,
+      warnings: warnings.slice(0, 20),
+    });
   }
 );

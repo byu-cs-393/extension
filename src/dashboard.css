@@ -475,6 +475,51 @@ body {
   color: #b91c1c;
 }
 
+.problem-note {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-style: italic;
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px dashed var(--border, #d1d5db);
+}
+
+.card-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.oa-timer {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d1d5db);
+  white-space: nowrap;
+}
+
+.oa-reset-link {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.oa-reset-link:hover {
+  color: var(--text-secondary);
+}
+
 .problem-empty {
   font-size: 13px;
   color: var(--text-tertiary);
