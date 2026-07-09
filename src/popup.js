@@ -8,6 +8,15 @@ import {
 
 const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
+// Both panels + the sync pill and footer — the popup toggles between
+// the pre-onboarding welcome and the normal current-week view based on
+// whether a netID is on file.
+const welcomePanel = document.getElementById("popup-welcome");
+const onboardedPanel = document.getElementById("popup-onboarded");
+const syncStatus = document.getElementById("popup-sync-status");
+const footer = document.getElementById("popup-footer");
+const continueSetupBtn = document.getElementById("continue-setup-btn");
+
 const weekLabel = document.getElementById("popup-week-label");
 const bar = document.getElementById("popup-progress-bar");
 const fill = document.getElementById("popup-progress-fill");
@@ -70,7 +79,30 @@ function render() {
   }
 }
 
+// Show either the welcome panel (no netID on file) or the current-week
+// view (onboarded). The sync pill + footer only make sense once
+// onboarding is done, so they piggyback on this decision.
+function showWelcome() {
+  welcomePanel.hidden = false;
+  onboardedPanel.hidden = true;
+  syncStatus.hidden = true;
+  footer.hidden = true;
+}
+
+function showOnboarded() {
+  welcomePanel.hidden = true;
+  onboardedPanel.hidden = false;
+  syncStatus.hidden = false;
+  footer.hidden = false;
+}
+
 async function init() {
+  const { netID } = await chrome.storage.sync.get("netID");
+  if (!netID) {
+    showWelcome();
+    return;
+  }
+  showOnboarded();
   currentWeeks = await getWeeks();
   const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
   currentSolves = solvedProblems ?? null;
@@ -104,6 +136,11 @@ nextBtn.addEventListener("click", () => {
 
 openDashboardBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  window.close();
+});
+
+continueSetupBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("onboard.html") });
   window.close();
 });
 

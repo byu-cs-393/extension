@@ -10,26 +10,68 @@
       <header class="onboard-header">
         <div class="brand">CS 393 Buddy</div>
         <ol class="step-indicator" aria-label="Setup progress">
-          <li class="step active" data-step="1">1 · BYU info</li>
+          <li class="step" data-step="0">Welcome</li>
           <li class="step-sep" aria-hidden="true">·</li>
-          <li class="step" data-step="2">2 · LeetCode</li>
+          <li class="step" data-step="1">Canvas</li>
+          <li class="step-sep" aria-hidden="true">·</li>
+          <li class="step" data-step="2">LeetCode</li>
         </ol>
+        <button
+          type="button"
+          class="help-toggle"
+          id="help-toggle"
+          aria-label="Open help"
+          aria-controls="help-drawer"
+          aria-expanded="false"
+        >
+          ?
+        </button>
       </header>
 
-      <!-- Step 1: Canvas identity -->
-      <section class="step-panel" data-step="1">
+      <!-- Step 0: Welcome -->
+      <section class="step-panel welcome-panel" data-step="0" hidden>
         <h1>Welcome to CS 393 Buddy</h1>
+        <p class="lede">Setup takes about 2 minutes.</p>
+
+        <div class="welcome-block">
+          <div class="welcome-heading">What this does</div>
+          <ul class="welcome-list">
+            <li>Tracks your weekly LeetCode work automatically</li>
+            <li>Reports your grade to Canvas</li>
+            <li>Lets you request topic exam signoffs from a TA</li>
+          </ul>
+        </div>
+
+        <div class="welcome-block">
+          <div class="welcome-heading">What it accesses</div>
+          <ul class="welcome-list">
+            <li>Your BYU Canvas session (to verify you're in CS 393)</li>
+            <li>Your LeetCode profile + solve history</li>
+          </ul>
+        </div>
+
+        <div class="welcome-block">
+          <div class="welcome-heading">What we don't do</div>
+          <ul class="welcome-list">
+            <li>Read anything unrelated to CS 393</li>
+            <li>Share your data with anyone outside the class</li>
+          </ul>
+        </div>
+
+        <button type="button" class="btn-primary" id="welcome-continue-btn">
+          Get started →
+        </button>
+      </section>
+
+      <!-- Step 1: Canvas identity -->
+      <section class="step-panel" data-step="1" hidden>
+        <h1>Sign in to Canvas</h1>
         <p class="lede">
-          Track your weekly LeetCode work, pass off topic exams with a TA, and stay synced with
-          Canvas.
+          We use your BYU Canvas session to verify you're enrolled in CS 393 — no typing required.
         </p>
 
         <!-- Canvas signed out: prompt the student to sign in. -->
         <div id="canvas-signed-out" class="canvas-state">
-          <p>
-            We use your BYU Canvas session to verify your identity. Sign in to Canvas and we'll
-            detect you automatically — no typing required.
-          </p>
           <button type="button" class="btn-primary" id="open-canvas-btn">
             Open BYU Canvas →
           </button>
@@ -71,7 +113,7 @@
               />
             </div>
 
-            <button type="submit" class="btn-primary">Continue →</button>
+            <button type="submit" class="btn-primary" id="step1-submit-btn">Continue →</button>
             <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
           </form>
 
@@ -85,8 +127,8 @@
       <section class="step-panel" data-step="2" hidden>
         <h1>Connect LeetCode</h1>
         <p class="lede">
-          We use your LeetCode account to track problems you've solved. Sign in to leetcode.com in
-          another tab — we'll detect your session automatically.
+          We use your LeetCode account to track problems you've solved. Sign in to leetcode.com and
+          we'll detect your session automatically.
         </p>
 
         <!-- Signed-out: prompt the student to sign in. -->
@@ -95,8 +137,24 @@
             Open leetcode.com →
           </button>
           <p class="hint">
-            Already signed in? <button type="button" class="btn-link inline" id="recheck-btn">Re-check session</button>
+            Already signed in?
+            <button type="button" class="btn-link inline" id="recheck-btn">Re-check session</button>
           </p>
+
+          <div class="signup-divider" aria-hidden="true">
+            <span>or</span>
+          </div>
+
+          <div class="signup-block">
+            <div class="signup-heading">Don't have a LeetCode account yet?</div>
+            <p class="signup-copy">
+              You'll need one to do the work for this class. Sign up (it's free), come back here,
+              and we'll link it.
+            </p>
+            <button type="button" class="btn-secondary" id="leetcode-signup-btn">
+              Sign up on leetcode.com →
+            </button>
+          </div>
         </div>
 
         <!-- Signed-in: confirm identity. -->
@@ -119,12 +177,67 @@
           <div id="step2-status" class="onboard-status" role="status" aria-live="polite"></div>
         </div>
       </section>
-
-      <p class="footnote">
-        For now we store identity locally and in Firestore. Canvas verification + privacy
-        disclosure will be added in a later pass.
-      </p>
     </main>
+
+    <!-- Help drawer (fixed on the right, toggled by the ? button) -->
+    <aside
+      id="help-drawer"
+      class="help-drawer"
+      hidden
+      role="dialog"
+      aria-label="Setup help"
+    >
+      <div class="help-header">
+        <h2>Help</h2>
+        <button type="button" class="help-close" id="help-close" aria-label="Close help">
+          ✕
+        </button>
+      </div>
+      <div class="help-body">
+        <div class="help-heading">Common issues</div>
+
+        <div class="help-item">
+          <div class="help-item-title">Canvas not detected</div>
+          <p>
+            Make sure you're signed in at
+            <a href="https://byu.instructure.com/" target="_blank" rel="noopener">
+              byu.instructure.com
+            </a>
+            and that the tab has finished loading, then click <em>Re-check session</em>.
+          </p>
+        </div>
+
+        <div class="help-item">
+          <div class="help-item-title">"Not enrolled" error</div>
+          <p>
+            If you just enrolled, Canvas can take a few hours to sync. Try again later, or
+            contact your instructor.
+          </p>
+        </div>
+
+        <div class="help-item">
+          <div class="help-item-title">Wrong Canvas account signed in</div>
+          <p>
+            The Canvas account you're signed in with must be your own BYU account. Use the
+            <em>Sign in to Canvas with a different account</em> link.
+          </p>
+        </div>
+
+        <div class="help-item">
+          <div class="help-item-title">LeetCode not detected</div>
+          <p>
+            Sign in at leetcode.com in another tab and complete the email verification if
+            prompted, then click <em>Re-check session</em>.
+          </p>
+        </div>
+
+        <div class="help-heading">Still stuck?</div>
+        <p>
+          Email <a href="mailto:jack684@byu.edu">jack684@byu.edu</a> with a screenshot of
+          what you're seeing.
+        </p>
+      </div>
+    </aside>
 
     <script type="module" src="onboard.js"></script>
   </body>

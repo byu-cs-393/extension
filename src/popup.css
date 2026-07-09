@@ -183,6 +183,37 @@ body {
   border-color: var(--text-tertiary);
 }
 
+/* Pre-onboarding welcome (shown when no netID is on file) */
+.welcome {
+  padding: 20px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.welcome-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.welcome-copy {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.welcome-note {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.welcome .btn-primary {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+
 /* Footer */
 .footer {
   display: flex;

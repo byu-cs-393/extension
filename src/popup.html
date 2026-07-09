@@ -8,13 +8,31 @@
   <body>
     <header class="header">
       <div class="brand">CS 393 Buddy</div>
-      <div class="sync-status">
+      <div class="sync-status" id="popup-sync-status">
         <span class="sync-check" aria-hidden="true">✓</span>
         <span>synced</span>
       </div>
     </header>
 
-    <section class="week">
+    <!-- Pre-onboarding state: compact welcome + Continue setup button.
+         Hidden by default; popup.js toggles based on whether a netID is
+         on file in chrome.storage.sync. -->
+    <section id="popup-welcome" class="welcome" hidden>
+      <h1 class="welcome-title">Welcome!</h1>
+      <p class="welcome-copy">
+        CS 393 Buddy tracks your weekly LeetCode work, reports your grade
+        to Canvas, and lets you request topic exam signoffs.
+      </p>
+      <p class="welcome-copy welcome-note">
+        Setup takes about 2 minutes.
+      </p>
+      <button type="button" class="btn-primary" id="continue-setup-btn">
+        Continue setup →
+      </button>
+    </section>
+
+    <!-- Onboarded state: current-week status. -->
+    <section id="popup-onboarded" class="week" hidden>
       <div class="week-label" id="popup-week-label">This week</div>
 
       <article class="card">
@@ -44,13 +62,13 @@
         </div>
         <button type="button" class="btn-primary">Request signoff</button>
       </article>
+
+      <div class="dashboard-link">
+        <button type="button" id="open-dashboard" class="btn-secondary">Open full dashboard →</button>
+      </div>
     </section>
 
-    <div class="dashboard-link">
-      <button type="button" id="open-dashboard" class="btn-secondary">Open full dashboard →</button>
-    </div>
-
-    <footer class="footer">
+    <footer class="footer" id="popup-footer" hidden>
       <a href="#" role="button">⚙ Settings</a>
       <span class="footer-sep" aria-hidden="true">·</span>
       <a href="#" role="button">🔒 Your data</a>

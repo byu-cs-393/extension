@@ -41,18 +41,65 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // ---- verifyStudent call ------------------------------------------------
 
+// Thrown by callVerifyStudent when verifyStudent returns a non-2xx.
+// The UI switches on `.code` to pick friendly copy; keeping this a
+// distinct class avoids fragile string-matching against `.message`.
+export class VerifyStudentError extends Error {
+  constructor({ code, status, serverMessage }) {
+    super(serverMessage || code || `verifyStudent HTTP ${status}`);
+    this.name = "VerifyStudentError";
+    this.code = code || null; // "not-found" | "permission-denied" | "internal" | "invalid-argument" | "method-not-allowed" | null
+    this.status = status; // HTTP status number
+  }
+}
+
 async function callVerifyStudent(netID, ltiUserId) {
-  const response = await fetch(VERIFY_STUDENT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ netID, ltiUserId }),
-  });
+  let response;
+  try {
+    response = await fetch(VERIFY_STUDENT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ netID, ltiUserId }),
+    });
+  } catch (networkError) {
+    // fetch() throws for network-level failures (offline, DNS, etc.).
+    // Give the UI a stable code to distinguish "we couldn't even reach
+    // the server" from a server response with a code.
+    throw new VerifyStudentError({
+      code: "network-error",
+      status: 0,
+      serverMessage: networkError.message,
+    });
+  }
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`verifyStudent ${response.status}: ${body}`);
+    let code = null;
+    let serverMessage = null;
+    // verifyStudent returns { error, code } on 4xx/5xx (see
+    // functions/index.js). Some 5xx paths (e.g. Cloud Run 502) return
+    // HTML, so guard the JSON parse.
+    try {
+      const body = await response.json();
+      if (body && typeof body === "object") {
+        code = body.code ?? null;
+        serverMessage = body.error ?? null;
+      }
+    } catch {
+      /* non-JSON body — leave code null and let the UI default to "internal" */
+    }
+    throw new VerifyStudentError({
+      code,
+      status: response.status,
+      serverMessage,
+    });
   }
   const data = await response.json();
-  if (!data?.token) throw new Error("verifyStudent returned no token.");
+  if (!data?.token) {
+    throw new VerifyStudentError({
+      code: "internal",
+      status: response.status,
+      serverMessage: "verifyStudent returned no token.",
+    });
+  }
   return data.token;
 }
 
