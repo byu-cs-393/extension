@@ -2,3 +2,7 @@
 *.m4a
 transcript-raw.txt
 .firebase/
+
+# Node dependencies + Vitest artifacts
+node_modules/
+coverage/

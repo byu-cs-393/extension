@@ -1,0 +1,14 @@
+{
+  "name": "cs393-buddy-extension",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Chrome extension client for CS 393 Buddy. Root package.json exists so we can run Vitest against the pure helpers in src/. Cloud Functions live in functions/ with their own package.json.",
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
