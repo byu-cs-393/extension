@@ -325,3 +325,124 @@ exports.dryRunGrades = onRequest(
     });
   }
 );
+
+// ---- pushCanvasTestGrade -----------------------------------------------
+//
+// Phase 2 Stage A: minimum-viable proof that we can write to Canvas.
+// Ignores Firestore entirely. Hardcoded target: pushes ONE grade to
+// ONE test assignment for the course's Test Student. If this returns
+// a Canvas 200 and the grade shows up in the gradebook, the plumbing
+// is proven and we generalize in Stage B.
+//
+// Auth: same instructor allowlist as dryRunGrades. Same log
+// collection so the audit trail stays chronological.
+//
+// Once Stage A works, this function is done — Stage B is a separate
+// pushCanvasGrades function that reads Firestore.
+
+const CANVAS_TEST_TARGET = {
+  courseId: 35464,
+  assignmentId: 1380333,
+  userId: 169685, // Test Student in course 35464
+  grade: "2", // out of 3 possible on the assignment — non-max so we can
+  // confirm we're actually setting the value, not just defaulting
+};
+
+exports.pushCanvasTestGrade = onRequest(
+  { secrets: [canvasToken], region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // ---- Auth check ----
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    if (!INSTRUCTOR_ALLOWLIST.includes(decoded.uid)) {
+      res.status(403).json({
+        error: `${decoded.uid} is not on the instructor allowlist.`,
+        code: "permission-denied",
+      });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const { courseId, assignmentId, userId, grade } = CANVAS_TEST_TARGET;
+    const canvasUrl =
+      `${CANVAS_BASE}/api/v1/courses/${courseId}` +
+      `/assignments/${assignmentId}/submissions/${userId}`;
+
+    // Canvas's grade-a-submission endpoint. `posted_grade` accepts a
+    // string; using string form is safest (matches all Canvas
+    // examples). Canvas overwrites any existing grade, so re-runs
+    // are safe.
+    let canvasStatus = 0;
+    let canvasBody = null;
+    let networkError = null;
+    try {
+      const canvasResp = await fetch(canvasUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${canvasToken.value()}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ submission: { posted_grade: String(grade) } }),
+      });
+      canvasStatus = canvasResp.status;
+      // Response might be non-JSON on some error paths (Cloud Run
+      // rejections etc.) — guard the parse.
+      try {
+        canvasBody = await canvasResp.json();
+      } catch {
+        canvasBody = { note: "response body was not JSON" };
+      }
+    } catch (err) {
+      networkError = err.message ?? String(err);
+    }
+
+    const finishedAt = Date.now();
+    const outcome =
+      networkError == null && canvasStatus >= 200 && canvasStatus < 300
+        ? "ok"
+        : "failed";
+
+    // Same collection as dryRunGrades logs, distinguished by prefix
+    // (`testPush-*`). Keeps chronological history in one place.
+    const runId = `testPush-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19)}`;
+    const db = getFirestore();
+    await db.doc(`gradeSyncLog/${runId}`).set({
+      startedAt,
+      finishedAt,
+      triggeredBy: decoded.uid,
+      target: CANVAS_TEST_TARGET,
+      canvasStatus,
+      canvasBody,
+      networkError,
+      outcome,
+    });
+
+    res.status(outcome === "ok" ? 200 : 502).json({
+      runId,
+      logPath: `gradeSyncLog/${runId}`,
+      outcome,
+      canvasStatus,
+      networkError,
+      canvasBody,
+    });
+  }
+);

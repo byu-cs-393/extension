@@ -36,6 +36,13 @@
           "serviceId": "dryrungrades",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/pushCanvasTestGrade",
+        "run": {
+          "serviceId": "pushcanvastestgrade",
+          "region": "us-central1"
+        }
       }
     ]
   }
