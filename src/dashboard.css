@@ -207,6 +207,26 @@ body {
   vertical-align: 2px;
 }
 
+/* Future weeks: faded, read-only preview. Only the course.html view
+   uses this state; the dashboard filters out future weeks entirely. */
+.week.future {
+  opacity: 0.55;
+}
+
+.week-badge.locked {
+  background: var(--bg, #f9fafb);
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  border: 1px solid var(--divider);
+}
+
+.card.future-placeholder {
+  border-style: dashed;
+  background: transparent;
+}
+
 .week-dates {
   font-size: 13px;
   color: var(--text-secondary);

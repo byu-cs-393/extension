@@ -439,6 +439,14 @@ function wireProfileMenu() {
   });
 }
 
+function wireFullCourseButton() {
+  const btn = document.getElementById("full-course-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    window.location.href = chrome.runtime.getURL("course.html");
+  });
+}
+
 // ---- Bootstrap ---------------------------------------------------------
 
 (async () => {
@@ -449,5 +457,6 @@ function wireProfileMenu() {
   }
   loadAndRender(netID);
   wireProfileMenu();
+  wireFullCourseButton();
   initWeeks(netID);
 })();

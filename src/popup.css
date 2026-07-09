@@ -21,6 +21,14 @@
   box-sizing: border-box;
 }
 
+/* Global — make the `hidden` HTML attribute actually hide elements
+   even when a later author rule sets `display: flex` / `grid` / etc.
+   Without this, the .welcome and .week panels both stay visible
+   because their `display` overrides the browser default. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   margin: 0;

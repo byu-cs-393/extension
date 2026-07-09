@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CS 393 Buddy · Full Course</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <div class="dashboard">
+      <header class="dashboard-header">
+        <div class="brand-block">
+          <span class="brand">CS 393 Buddy</span>
+          <span class="separator" aria-hidden="true">·</span>
+          <span class="term">Spring 2026 · Full course</span>
+        </div>
+        <div class="actions">
+          <button class="header-btn" id="back-to-dashboard-btn">← Dashboard</button>
+        </div>
+      </header>
+
+      <main>
+        <div class="greeting">Every week this semester</div>
+
+        <div id="weeks-container" class="weeks-container">
+          <p id="weeks-empty" class="weeks-empty">Loading weeks…</p>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="course.js"></script>
+  </body>
+</html>
