@@ -190,8 +190,14 @@ async function markSolved(slug) {
 // same grade.
 const pushDebounce = new Map(); // slug -> lastFireAt (ms)
 const PUSH_DEBOUNCE_MS = 30 * 1000;
-const PUSH_MY_RECENT_GRADE_URL = "https://cs393-496021.web.app/api/pushMyRecentGrade";
 
+// We DON'T fetch directly from here. MV3 content scripts run in the
+// host page's origin (leetcode.com) and get blocked by CORS when
+// hitting our Cloud Function through Firebase Hosting rewrites.
+// Instead, forward the request via chrome.runtime.sendMessage to the
+// background service worker, which is an extension page and has the
+// host_permissions CORS bypass. See background.js's onMessage
+// handler for the actual fetch.
 function firePushMyRecentGrade(slug) {
   const now = Date.now();
   const lastFire = pushDebounce.get(slug) ?? 0;
@@ -201,28 +207,19 @@ function firePushMyRecentGrade(slug) {
   }
   pushDebounce.set(slug, now);
 
-  (async () => {
-    try {
-      const idToken = await getStoredFirebaseIdToken();
-      if (!idToken) {
-        console.log("[CS 393 Buddy] real-time push: no auth token, skipping");
+  chrome.runtime.sendMessage(
+    { type: "pushMyRecentGrade", slug },
+    (result) => {
+      if (chrome.runtime.lastError) {
+        console.error(
+          "[CS 393 Buddy] real-time push failed:",
+          chrome.runtime.lastError.message
+        );
         return;
       }
-      const response = await fetch(PUSH_MY_RECENT_GRADE_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ slug }),
-      });
-      const result = await response.json().catch(() => null);
-      console.log("[CS 393 Buddy] real-time push:", result ?? response.status);
-    } catch (error) {
-      // Nightly reconciliation will fix whatever this missed.
-      console.error("[CS 393 Buddy] real-time push failed:", error);
+      console.log("[CS 393 Buddy] real-time push:", result);
     }
-  })();
+  );
 }
 
 // Returns a map of { slug: timestampMs }. Tolerates 404 (no student doc
