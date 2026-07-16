@@ -763,7 +763,18 @@ exports.pushCanvasGrades = onRequest(
 // for themselves regardless of what payload they send.
 
 exports.pushMyRecentGrade = onRequest(
-  { secrets: [canvasToken], region: "us-central1" },
+  {
+    secrets: [canvasToken],
+    region: "us-central1",
+    // Called from leetcode-tracker.js content script on leetcode.com,
+    // which in MV3 doesn't get the extension's CORS-bypass privilege.
+    // Firebase's `cors: true` reflects the request's Origin header
+    // and handles OPTIONS preflight automatically. Auth is still
+    // required inside the function, so opening CORS doesn't
+    // meaningfully reduce security — attackers can't forge a
+    // Firebase ID token cross-origin anyway.
+    cors: true,
+  },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
