@@ -164,14 +164,65 @@ async function markSolved(slug) {
     console.error("[CS 393 Buddy] failed to update solved cache:", error);
   }
 
+  let firestoreOk = false;
   try {
     const existing = await fetchSolvedProblemsFromFirestore(netID);
     const updated = { ...existing, [slug]: solvedAt };
     await writeSolvedProblemsToFirestore(netID, updated);
+    firestoreOk = true;
     console.log(`[CS 393 Buddy] persisted solved: ${slug} @ ${new Date(solvedAt).toISOString()}`);
   } catch (error) {
     console.error("[CS 393 Buddy] failed to persist solved to Firestore:", error);
   }
+
+  // Fire-and-forget real-time Canvas grade push. Only runs if the
+  // Firestore write above succeeded — otherwise the Cloud Function
+  // would read stale data. Any failure gets picked up by the nightly
+  // pushCanvasGrades reconciliation, so we don't need to retry here.
+  if (firestoreOk) {
+    firePushMyRecentGrade(slug);
+  }
+}
+
+// Per-tab debounce: skip if we already fired for this slug within
+// PUSH_DEBOUNCE_MS. Cross-tab races are OK because Canvas grade
+// writes are idempotent — worst case we make two calls that write the
+// same grade.
+const pushDebounce = new Map(); // slug -> lastFireAt (ms)
+const PUSH_DEBOUNCE_MS = 30 * 1000;
+const PUSH_MY_RECENT_GRADE_URL = "https://cs393-496021.web.app/api/pushMyRecentGrade";
+
+function firePushMyRecentGrade(slug) {
+  const now = Date.now();
+  const lastFire = pushDebounce.get(slug) ?? 0;
+  if (now - lastFire < PUSH_DEBOUNCE_MS) {
+    console.log(`[CS 393 Buddy] real-time push debounced for ${slug}`);
+    return;
+  }
+  pushDebounce.set(slug, now);
+
+  (async () => {
+    try {
+      const idToken = await getStoredFirebaseIdToken();
+      if (!idToken) {
+        console.log("[CS 393 Buddy] real-time push: no auth token, skipping");
+        return;
+      }
+      const response = await fetch(PUSH_MY_RECENT_GRADE_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ slug }),
+      });
+      const result = await response.json().catch(() => null);
+      console.log("[CS 393 Buddy] real-time push:", result ?? response.status);
+    } catch (error) {
+      // Nightly reconciliation will fix whatever this missed.
+      console.error("[CS 393 Buddy] real-time push failed:", error);
+    }
+  })();
 }
 
 // Returns a map of { slug: timestampMs }. Tolerates 404 (no student doc

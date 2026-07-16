@@ -50,6 +50,13 @@
           "serviceId": "pushcanvasgrades",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/pushMyRecentGrade",
+        "run": {
+          "serviceId": "pushmyrecentgrade",
+          "region": "us-central1"
+        }
       }
     ]
   }

@@ -744,3 +744,156 @@ exports.pushCanvasGrades = onRequest(
     });
   }
 );
+
+// ---- pushMyRecentGrade -------------------------------------------------
+//
+// Real-time counterpart to pushCanvasGrades. Called by
+// leetcode-tracker.js right after a solve is persisted to Firestore.
+// Scope: only the caller's own recommended grade for the week
+// containing the just-solved problem.
+//
+// The nightly pushCanvasGrades still runs and reconciles everything,
+// so if this call misses (student closed browser mid-flight, network
+// hiccup, etc.), the batch catches up within 24h. That's why this
+// function only writes a log doc on FAILURE — successes are silent
+// and don't clutter gradeSyncLog with hundreds of docs per day.
+//
+// Auth: any authenticated student. netID is DERIVED FROM auth.uid,
+// not read from the body — a student can only ever trigger a push
+// for themselves regardless of what payload they send.
+
+exports.pushMyRecentGrade = onRequest(
+  { secrets: [canvasToken], region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // ---- Auth ----
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    const netID = decoded.uid; // trust the token, ignore any netID in body
+
+    // ---- Body ----
+    const { slug } = req.body ?? {};
+    if (typeof slug !== "string" || !slug) {
+      res.status(400).json({ error: "Missing slug in body.", code: "invalid-argument" });
+      return;
+    }
+
+    const db = getFirestore();
+    const now = Date.now();
+
+    // ---- Find the currently-active week containing this slug ----
+    const weeksSnap = await db.collection(`classes/${CLASS_ID}/weeks`).get();
+    const matchingWeek = weeksSnap.docs
+      .map((d) => d.data())
+      .find(
+        (w) =>
+          Number.isFinite(w?.startDate) &&
+          Number.isFinite(w?.endDate) &&
+          w.startDate <= now &&
+          now < w.endDate &&
+          Array.isArray(w.problems) &&
+          w.problems.some((p) => p?.slug === slug)
+      );
+
+    if (!matchingWeek) {
+      // Solve wasn't for a current-week's recommended problem. Common
+      // case (personal practice on a random LeetCode problem).
+      res.status(200).json({ outcome: "no-op", reason: "slug not in any current week's recommended list" });
+      return;
+    }
+
+    // ---- Fetch student ----
+    const studentSnap = await db.doc(`students/${netID}`).get();
+    if (!studentSnap.exists) {
+      res.status(200).json({ outcome: "no-op", reason: "no student doc" });
+      return;
+    }
+    const student = studentSnap.data();
+    const canvasUserId = student?.canvasUserId ?? null;
+    const solves =
+      student?.solvedProblems && typeof student.solvedProblems === "object"
+        ? student.solvedProblems
+        : {};
+
+    // ---- Skip checks ----
+    const canvasAssignmentId = matchingWeek.canvasAssignmentId ?? null;
+    if (canvasAssignmentId == null) {
+      res.status(200).json({
+        outcome: "skipped-no-assignment",
+        weekNum: matchingWeek.weekNum,
+      });
+      return;
+    }
+    if (canvasUserId == null) {
+      res.status(200).json({
+        outcome: "skipped-no-user",
+        weekNum: matchingWeek.weekNum,
+      });
+      return;
+    }
+
+    // ---- Compute recommended grade for this week ----
+    const recSolved = matchingWeek.problems.filter((p) => {
+      const ts = solves[p?.slug];
+      return typeof ts === "number" && ts >= matchingWeek.startDate && ts < matchingWeek.endDate;
+    }).length;
+
+    // ---- Push ----
+    const { canvasStatus, canvasError } = await pushGradeToCanvas({
+      courseId: CANVAS_COURSE_ID,
+      assignmentId: canvasAssignmentId,
+      userId: canvasUserId,
+      grade: recSolved,
+      token: canvasToken.value(),
+    });
+    const outcome = canvasError == null ? "ok" : "failed";
+
+    // ---- Log only on failure ----
+    if (outcome === "failed") {
+      const runId = `myPush-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .slice(0, 19)}-${netID}`;
+      try {
+        await db.doc(`gradeSyncLog/${runId}`).set({
+          startedAt: now,
+          finishedAt: Date.now(),
+          triggeredBy: netID,
+          trigger: "real-time",
+          weekNum: matchingWeek.weekNum,
+          slug,
+          recSolved,
+          canvasAssignmentId,
+          canvasUserId,
+          canvasStatus,
+          canvasError,
+          outcome,
+        });
+      } catch (logErr) {
+        console.error("Failed to write failure log:", logErr);
+      }
+    }
+
+    res.status(outcome === "ok" ? 200 : 502).json({
+      outcome,
+      weekNum: matchingWeek.weekNum,
+      grade: recSolved,
+      canvasStatus,
+      ...(canvasError ? { canvasError } : {}),
+    });
+  }
+);
