@@ -67,6 +67,35 @@ async function fetchCanvasProfile(netID, token) {
   return profileResp.json();
 }
 
+// Returns true if the given Canvas user has a TA or Teacher enrollment
+// in the given course. Any failure (network, permissions, unexpected
+// response shape) returns false — we never want to fail a student
+// sign-in because the TA-check API had a hiccup.
+//
+// We accept both TaEnrollment and TeacherEnrollment as "TA role" for
+// the extension's purposes. If we ever need to distinguish professor
+// from TA (e.g., a professor-only feature), we split the role claim
+// into "ta" and "instructor". Not needed for MVP.
+const CS_393_COURSE_ID = 35464;
+async function isCourseTaOrInstructor(canvasUserId, courseId, token) {
+  if (!canvasUserId || !courseId) return false;
+  try {
+    const url =
+      `${CANVAS_BASE}/api/v1/courses/${courseId}/enrollments` +
+      `?user_id=${encodeURIComponent(canvasUserId)}` +
+      `&type[]=TaEnrollment&type[]=TeacherEnrollment`;
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    if (!resp.ok) return false;
+    const enrollments = await resp.json();
+    return Array.isArray(enrollments) && enrollments.length > 0;
+  } catch (err) {
+    console.warn("TA enrollment check failed:", err);
+    return false;
+  }
+}
+
 exports.verifyStudent = onRequest(
   { secrets: [canvasToken], region: "us-central1" },
   async (req, res) => {
@@ -107,7 +136,23 @@ exports.verifyStudent = onRequest(
       return;
     }
 
-    const customToken = await getAuth().createCustomToken(netID);
+    // Identity confirmed. Now check whether this student is also a
+    // TA/instructor in the course — if so, mint the token with an
+    // additional `role: "ta"` claim so Firestore rules and the
+    // extension UI can gate TA-only features on it.
+    //
+    // Failure of this check silently omits the claim (see
+    // isCourseTaOrInstructor's error handling) — we never want a
+    // student sign-in to fail because the TA lookup had a network
+    // hiccup. Non-TAs get the same token they always got.
+    const isTa = await isCourseTaOrInstructor(
+      profile.id,
+      CS_393_COURSE_ID,
+      canvasToken.value()
+    );
+
+    const additionalClaims = isTa ? { role: "ta" } : undefined;
+    const customToken = await getAuth().createCustomToken(netID, additionalClaims);
     res.status(200).json({ token: customToken });
   }
 );

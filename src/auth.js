@@ -188,6 +188,36 @@ export async function signOut() {
   await chrome.storage.local.remove("firebaseAuth");
 }
 
+// Reads a claim out of the current Firebase ID token without
+// re-verifying its signature — we trust the token because it was
+// minted by our verifyStudent Cloud Function and Firebase Auth on our
+// project. Returns null if no valid token is cached.
+//
+// The token is a JWT with 3 base64url-encoded segments separated by
+// dots: header.payload.signature. We decode the payload only.
+function decodeIdTokenPayload(idToken) {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    // base64url → base64: swap chars and pad.
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "===".slice((b64.length + 3) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+// Returns "ta" if the current signed-in user has the TA role claim
+// (added by verifyStudent when Canvas reports them as a TA/instructor
+// in course 35464). Returns null otherwise.
+export async function getRole() {
+  const { firebaseAuth } = await chrome.storage.local.get("firebaseAuth");
+  if (!firebaseAuth?.idToken) return null;
+  const payload = decodeIdTokenPayload(firebaseAuth.idToken);
+  return payload?.role ?? null;
+}
+
 // Unconditionally swap the cached ID token for a fresh one. Used by
 // the background service worker's periodic refresh — it can't rely on
 // the buffer-based check in getIdToken because the alarm may fire
