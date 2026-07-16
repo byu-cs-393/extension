@@ -46,7 +46,7 @@ service cloud.firestore {
 
     function isValidStudentDoc(data) {
       return data.keys().hasOnly([
-        'name', 'note', 'leetcodeUsername', 'solvedProblems'
+        'name', 'note', 'leetcodeUsername', 'solvedProblems', 'canvasUserId'
       ]);
     }
 
@@ -103,7 +103,7 @@ service cloud.firestore {
 
     function isValidWeekDoc(data) {
       return data.keys().hasAll(['weekNum', 'startDate', 'endDate', 'problems'])
-          && data.keys().hasOnly(['weekNum', 'startDate', 'endDate', 'problems', 'thirdCard'])
+          && data.keys().hasOnly(['weekNum', 'startDate', 'endDate', 'problems', 'thirdCard', 'canvasAssignmentId'])
           && data.weekNum is number
           && data.startDate is number
           && data.endDate is number

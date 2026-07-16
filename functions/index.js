@@ -348,6 +348,11 @@ const CANVAS_TEST_TARGET = {
   // confirm we're actually setting the value, not just defaulting
 };
 
+// Course ID for CS 393 in Canvas. Used by pushCanvasGrades.
+// Hardcoded for now; would move to classes/cs393.canvasCourseId
+// once we support multiple classes.
+const CANVAS_COURSE_ID = 35464;
+
 exports.pushCanvasTestGrade = onRequest(
   { secrets: [canvasToken], region: "us-central1" },
   async (req, res) => {
@@ -443,6 +448,201 @@ exports.pushCanvasTestGrade = onRequest(
       canvasStatus,
       networkError,
       canvasBody,
+    });
+  }
+);
+
+// ---- pushCanvasGrades --------------------------------------------------
+//
+// Phase 2 Stage B: real grade sync driven by Firestore data.
+//
+// For each (student, week) pair, computes the recommended-problem
+// grade the same way dryRunGrades does, then pushes it to Canvas
+// via PUT /submissions/{userId} — same endpoint used by
+// pushCanvasTestGrade.
+//
+// Each row skips gracefully if any of these are missing:
+//   - week.canvasAssignmentId (no Canvas column to write to)
+//   - student.canvasUserId    (we don't know their Canvas row)
+//
+// Third-card grades are NOT pushed in this version. Follow-up.
+//
+// Auth: same instructor allowlist as dryRunGrades. Log doc lands
+// in the same gradeSyncLog collection under a "push-*" prefix so
+// dry-runs and real pushes stay chronologically together.
+
+exports.pushCanvasGrades = onRequest(
+  { secrets: [canvasToken], region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // ---- Auth check ----
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    if (!INSTRUCTOR_ALLOWLIST.includes(decoded.uid)) {
+      res.status(403).json({
+        error: `${decoded.uid} is not on the instructor allowlist.`,
+        code: "permission-denied",
+      });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const db = getFirestore();
+
+    // ---- Fetch weeks + students in parallel ----
+    const [weeksSnap, studentsSnap] = await Promise.all([
+      db.collection(`classes/${CLASS_ID}/weeks`).get(),
+      db.collection("students").get(),
+    ]);
+
+    const now = Date.now();
+    const weeks = weeksSnap.docs
+      .map((d) => d.data())
+      .filter((w) => Number.isFinite(w?.startDate) && w.startDate <= now)
+      .sort((a, b) => a.weekNum - b.weekNum);
+
+    // ---- Per-row push loop ----
+    const results = {}; // netID -> weekNum -> row
+    const flatRows = [];
+    const warnings = [];
+    const totals = { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, failed: 0 };
+
+    for (const studentDoc of studentsSnap.docs) {
+      const netID = studentDoc.id;
+      const student = studentDoc.data();
+      const solves =
+        student?.solvedProblems && typeof student.solvedProblems === "object"
+          ? student.solvedProblems
+          : {};
+      const canvasUserId = student?.canvasUserId ?? null;
+      results[netID] = {};
+
+      for (const week of weeks) {
+        const weekNum = week.weekNum;
+        const problems = Array.isArray(week.problems) ? week.problems : [];
+
+        // Compute recommended grade (same math as dryRunGrades)
+        const recSolved = problems.filter((p) => {
+          const ts = solves[p?.slug];
+          return typeof ts === "number" && ts >= week.startDate && ts < week.endDate;
+        }).length;
+        const recTotal = problems.length;
+
+        const canvasAssignmentId = week.canvasAssignmentId ?? null;
+
+        // Skip logic — logged separately from failures for clarity.
+        if (canvasAssignmentId == null) {
+          const row = {
+            netID, weekNum, category: "recommended",
+            points: recSolved, maxPoints: recTotal,
+            canvasAssignmentId: null, canvasUserId,
+            outcome: "skipped-no-assignment",
+          };
+          results[netID][weekNum] = row;
+          flatRows.push(row);
+          totals.skippedNoAssignment++;
+          continue;
+        }
+        if (canvasUserId == null) {
+          const row = {
+            netID, weekNum, category: "recommended",
+            points: recSolved, maxPoints: recTotal,
+            canvasAssignmentId, canvasUserId: null,
+            outcome: "skipped-no-user",
+          };
+          results[netID][weekNum] = row;
+          flatRows.push(row);
+          totals.skippedNoUser++;
+          continue;
+        }
+
+        // Push to Canvas.
+        const canvasUrl =
+          `${CANVAS_BASE}/api/v1/courses/${CANVAS_COURSE_ID}` +
+          `/assignments/${canvasAssignmentId}/submissions/${canvasUserId}`;
+        let canvasStatus = 0;
+        let canvasError = null;
+        try {
+          const resp = await fetch(canvasUrl, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${canvasToken.value()}`,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              submission: { posted_grade: String(recSolved) },
+            }),
+          });
+          canvasStatus = resp.status;
+          if (!(canvasStatus >= 200 && canvasStatus < 300)) {
+            canvasError = await resp
+              .json()
+              .catch(() => ({ note: "response body was not JSON" }));
+          }
+        } catch (err) {
+          canvasError = { message: err.message ?? String(err) };
+        }
+
+        const outcome =
+          canvasError == null && canvasStatus >= 200 && canvasStatus < 300
+            ? "ok"
+            : "failed";
+        if (outcome === "ok") totals.ok++;
+        else totals.failed++;
+
+        const row = {
+          netID, weekNum, category: "recommended",
+          points: recSolved, maxPoints: recTotal,
+          canvasAssignmentId, canvasUserId,
+          canvasStatus, outcome,
+          ...(canvasError ? { canvasError } : {}),
+        };
+        results[netID][weekNum] = row;
+        flatRows.push(row);
+      }
+    }
+
+    // ---- Write log ----
+    const runId = `push-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19)}`;
+    const finishedAt = Date.now();
+    await db.doc(`gradeSyncLog/${runId}`).set({
+      startedAt,
+      finishedAt,
+      triggeredBy: decoded.uid,
+      classId: CLASS_ID,
+      canvasCourseId: CANVAS_COURSE_ID,
+      studentsProcessed: studentsSnap.size,
+      weeksProcessed: weeks.length,
+      totals,
+      results,
+      flatRows,
+      warnings,
+    });
+
+    res.status(200).json({
+      runId,
+      logPath: `gradeSyncLog/${runId}`,
+      studentsProcessed: studentsSnap.size,
+      weeksProcessed: weeks.length,
+      totals,
     });
   }
 );

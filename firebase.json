@@ -43,6 +43,13 @@
           "serviceId": "pushcanvastestgrade",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/pushCanvasGrades",
+        "run": {
+          "serviceId": "pushcanvasgrades",
+          "region": "us-central1"
+        }
       }
     ]
   }
