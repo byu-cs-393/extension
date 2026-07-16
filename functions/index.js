@@ -766,16 +766,33 @@ exports.pushMyRecentGrade = onRequest(
   {
     secrets: [canvasToken],
     region: "us-central1",
-    // Called from leetcode-tracker.js content script on leetcode.com,
-    // which in MV3 doesn't get the extension's CORS-bypass privilege.
-    // Firebase's `cors: true` reflects the request's Origin header
-    // and handles OPTIONS preflight automatically. Auth is still
-    // required inside the function, so opening CORS doesn't
-    // meaningfully reduce security — attackers can't forge a
-    // Firebase ID token cross-origin anyway.
+    // `cors: true` on the function is defense-in-depth — the manual
+    // headers below are what actually make browsers happy when the
+    // request goes through the Firebase Hosting rewrite, because
+    // Hosting can intercept OPTIONS preflights before the function's
+    // own cors middleware runs.
     cors: true,
   },
   async (req, res) => {
+    // ---- Manual CORS (belt-and-suspenders for Hosting-rewrite path) ----
+    // Called from leetcode-tracker.js content script on leetcode.com,
+    // which in MV3 doesn't get the extension's CORS-bypass privilege.
+    // Auth is still required inside the function, so opening CORS
+    // doesn't meaningfully reduce security — attackers can't forge a
+    // Firebase ID token cross-origin anyway.
+    const origin = req.get("origin") ?? "*";
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Max-Age", "3600");
+
+    // Preflight — no body needed, no auth check needed. Just 204.
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
     if (req.method !== "POST") {
       res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
       return;
