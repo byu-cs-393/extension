@@ -19,6 +19,7 @@
 // Errors return HTTP 4xx with { "error": "...", "code": "..." }.
 
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
@@ -515,6 +516,212 @@ async function pushGradeToCanvas({ courseId, assignmentId, userId, grade, token 
   }
 }
 
+// Shared implementation used by both the HTTP endpoint and the
+// scheduled function. Reads Firestore, computes grades, pushes to
+// Canvas, writes a summary to gradeSyncLog. Returns the summary so
+// callers can log/return it however they need.
+//
+// `triggeredBy` — netID for HTTP calls, "system" for scheduled runs.
+// `trigger`      — "manual" | "scheduled". Recorded in the log doc
+//                   so we can distinguish real-time vs nightly rows.
+async function runPushCanvasGrades({ triggeredBy, trigger, token }) {
+  const startedAt = Date.now();
+  const db = getFirestore();
+
+  // ---- Fetch weeks + students in parallel ----
+  const [weeksSnap, studentsSnap] = await Promise.all([
+    db.collection(`classes/${CLASS_ID}/weeks`).get(),
+    db.collection("students").get(),
+  ]);
+
+  const now = Date.now();
+  const weeks = weeksSnap.docs
+    .map((d) => d.data())
+    .filter((w) => Number.isFinite(w?.startDate) && w.startDate <= now)
+    .sort((a, b) => a.weekNum - b.weekNum);
+
+  // ---- Fetch each student's weekProgress in parallel ----
+  const progressByStudent = {};
+  await Promise.all(
+    studentsSnap.docs.map(async (doc) => {
+      const netID = doc.id;
+      const snap = await db.collection(`students/${netID}/weekProgress`).get();
+      const byWeek = {};
+      for (const p of snap.docs) {
+        const data = p.data();
+        if (Number.isFinite(data?.weekNum)) {
+          byWeek[data.weekNum] = data;
+        }
+      }
+      progressByStudent[netID] = byWeek;
+    })
+  );
+
+  // ---- Per-row push loop ----
+  const results = {};
+  const flatRows = [];
+  const warnings = [];
+  const totals = {
+    recommended: { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, failed: 0 },
+    thirdCard: { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, skippedNoCard: 0, failed: 0 },
+  };
+
+  for (const studentDoc of studentsSnap.docs) {
+    const netID = studentDoc.id;
+    const student = studentDoc.data();
+    const solves =
+      student?.solvedProblems && typeof student.solvedProblems === "object"
+        ? student.solvedProblems
+        : {};
+    const canvasUserId = student?.canvasUserId ?? null;
+    const progressByWeek = progressByStudent[netID] ?? {};
+    results[netID] = {};
+
+    for (const week of weeks) {
+      const weekNum = week.weekNum;
+      const problems = Array.isArray(week.problems) ? week.problems : [];
+      const cell = { recommended: null, thirdCard: null };
+
+      // -- Recommended --
+      const recSolved = problems.filter((p) => {
+        const ts = solves[p?.slug];
+        return typeof ts === "number" && ts >= week.startDate && ts < week.endDate;
+      }).length;
+      const recTotal = problems.length;
+      const recAssignmentId = week.canvasAssignmentId ?? null;
+
+      if (recAssignmentId == null) {
+        const row = {
+          netID, weekNum, category: "recommended",
+          points: recSolved, maxPoints: recTotal,
+          canvasAssignmentId: null, canvasUserId,
+          outcome: "skipped-no-assignment",
+        };
+        cell.recommended = row;
+        flatRows.push(row);
+        totals.recommended.skippedNoAssignment++;
+      } else if (canvasUserId == null) {
+        const row = {
+          netID, weekNum, category: "recommended",
+          points: recSolved, maxPoints: recTotal,
+          canvasAssignmentId: recAssignmentId, canvasUserId: null,
+          outcome: "skipped-no-user",
+        };
+        cell.recommended = row;
+        flatRows.push(row);
+        totals.recommended.skippedNoUser++;
+      } else {
+        const { canvasStatus, canvasError } = await pushGradeToCanvas({
+          courseId: CANVAS_COURSE_ID,
+          assignmentId: recAssignmentId,
+          userId: canvasUserId,
+          grade: recSolved,
+          token,
+        });
+        const outcome = canvasError == null ? "ok" : "failed";
+        if (outcome === "ok") totals.recommended.ok++;
+        else totals.recommended.failed++;
+        const row = {
+          netID, weekNum, category: "recommended",
+          points: recSolved, maxPoints: recTotal,
+          canvasAssignmentId: recAssignmentId, canvasUserId,
+          canvasStatus, outcome,
+          ...(canvasError ? { canvasError } : {}),
+        };
+        cell.recommended = row;
+        flatRows.push(row);
+      }
+
+      // -- Third card --
+      if (!week.thirdCard?.type) {
+        totals.thirdCard.skippedNoCard++;
+      } else {
+        const tcAssignmentId = week.thirdCard.canvasAssignmentId ?? null;
+        const { earned, total } = computeThirdCardGrade(
+          week.thirdCard,
+          progressByWeek[weekNum]
+        );
+
+        if (tcAssignmentId == null) {
+          const row = {
+            netID, weekNum, category: "thirdCard",
+            subtype: week.thirdCard.type,
+            points: earned, maxPoints: total,
+            canvasAssignmentId: null, canvasUserId,
+            outcome: "skipped-no-assignment",
+          };
+          cell.thirdCard = row;
+          flatRows.push(row);
+          totals.thirdCard.skippedNoAssignment++;
+        } else if (canvasUserId == null) {
+          const row = {
+            netID, weekNum, category: "thirdCard",
+            subtype: week.thirdCard.type,
+            points: earned, maxPoints: total,
+            canvasAssignmentId: tcAssignmentId, canvasUserId: null,
+            outcome: "skipped-no-user",
+          };
+          cell.thirdCard = row;
+          flatRows.push(row);
+          totals.thirdCard.skippedNoUser++;
+        } else {
+          const { canvasStatus, canvasError } = await pushGradeToCanvas({
+            courseId: CANVAS_COURSE_ID,
+            assignmentId: tcAssignmentId,
+            userId: canvasUserId,
+            grade: earned,
+            token,
+          });
+          const outcome = canvasError == null ? "ok" : "failed";
+          if (outcome === "ok") totals.thirdCard.ok++;
+          else totals.thirdCard.failed++;
+          const row = {
+            netID, weekNum, category: "thirdCard",
+            subtype: week.thirdCard.type,
+            points: earned, maxPoints: total,
+            canvasAssignmentId: tcAssignmentId, canvasUserId,
+            canvasStatus, outcome,
+            ...(canvasError ? { canvasError } : {}),
+          };
+          cell.thirdCard = row;
+          flatRows.push(row);
+        }
+      }
+
+      results[netID][weekNum] = cell;
+    }
+  }
+
+  // ---- Write log ----
+  const runId = `push-${new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .slice(0, 19)}`;
+  const finishedAt = Date.now();
+  await db.doc(`gradeSyncLog/${runId}`).set({
+    startedAt,
+    finishedAt,
+    triggeredBy,
+    trigger,
+    classId: CLASS_ID,
+    canvasCourseId: CANVAS_COURSE_ID,
+    studentsProcessed: studentsSnap.size,
+    weeksProcessed: weeks.length,
+    totals,
+    results,
+    flatRows,
+    warnings,
+  });
+
+  return {
+    runId,
+    logPath: `gradeSyncLog/${runId}`,
+    studentsProcessed: studentsSnap.size,
+    weeksProcessed: weeks.length,
+    totals,
+  };
+}
+
 exports.pushCanvasGrades = onRequest(
   { secrets: [canvasToken], region: "us-central1" },
   async (req, res) => {
@@ -544,204 +751,47 @@ exports.pushCanvasGrades = onRequest(
       return;
     }
 
-    const startedAt = Date.now();
-    const db = getFirestore();
-    const token = canvasToken.value();
-
-    // ---- Fetch weeks + students in parallel ----
-    const [weeksSnap, studentsSnap] = await Promise.all([
-      db.collection(`classes/${CLASS_ID}/weeks`).get(),
-      db.collection("students").get(),
-    ]);
-
-    const now = Date.now();
-    const weeks = weeksSnap.docs
-      .map((d) => d.data())
-      .filter((w) => Number.isFinite(w?.startDate) && w.startDate <= now)
-      .sort((a, b) => a.weekNum - b.weekNum);
-
-    // ---- Fetch each student's weekProgress in parallel ----
-    // Needed for the third-card grade computation. Same pattern as
-    // dryRunGrades.
-    const progressByStudent = {};
-    await Promise.all(
-      studentsSnap.docs.map(async (doc) => {
-        const netID = doc.id;
-        const snap = await db.collection(`students/${netID}/weekProgress`).get();
-        const byWeek = {};
-        for (const p of snap.docs) {
-          const data = p.data();
-          if (Number.isFinite(data?.weekNum)) {
-            byWeek[data.weekNum] = data;
-          }
-        }
-        progressByStudent[netID] = byWeek;
-      })
-    );
-
-    // ---- Per-row push loop ----
-    const results = {}; // netID -> weekNum -> { recommended, thirdCard }
-    const flatRows = [];
-    const warnings = [];
-    const totals = {
-      recommended: { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, failed: 0 },
-      thirdCard: { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, skippedNoCard: 0, failed: 0 },
-    };
-
-    for (const studentDoc of studentsSnap.docs) {
-      const netID = studentDoc.id;
-      const student = studentDoc.data();
-      const solves =
-        student?.solvedProblems && typeof student.solvedProblems === "object"
-          ? student.solvedProblems
-          : {};
-      const canvasUserId = student?.canvasUserId ?? null;
-      const progressByWeek = progressByStudent[netID] ?? {};
-      results[netID] = {};
-
-      for (const week of weeks) {
-        const weekNum = week.weekNum;
-        const problems = Array.isArray(week.problems) ? week.problems : [];
-        const cell = { recommended: null, thirdCard: null };
-
-        // -- Recommended --
-        const recSolved = problems.filter((p) => {
-          const ts = solves[p?.slug];
-          return typeof ts === "number" && ts >= week.startDate && ts < week.endDate;
-        }).length;
-        const recTotal = problems.length;
-        const recAssignmentId = week.canvasAssignmentId ?? null;
-
-        if (recAssignmentId == null) {
-          const row = {
-            netID, weekNum, category: "recommended",
-            points: recSolved, maxPoints: recTotal,
-            canvasAssignmentId: null, canvasUserId,
-            outcome: "skipped-no-assignment",
-          };
-          cell.recommended = row;
-          flatRows.push(row);
-          totals.recommended.skippedNoAssignment++;
-        } else if (canvasUserId == null) {
-          const row = {
-            netID, weekNum, category: "recommended",
-            points: recSolved, maxPoints: recTotal,
-            canvasAssignmentId: recAssignmentId, canvasUserId: null,
-            outcome: "skipped-no-user",
-          };
-          cell.recommended = row;
-          flatRows.push(row);
-          totals.recommended.skippedNoUser++;
-        } else {
-          const { canvasStatus, canvasError } = await pushGradeToCanvas({
-            courseId: CANVAS_COURSE_ID,
-            assignmentId: recAssignmentId,
-            userId: canvasUserId,
-            grade: recSolved,
-            token,
-          });
-          const outcome = canvasError == null ? "ok" : "failed";
-          if (outcome === "ok") totals.recommended.ok++;
-          else totals.recommended.failed++;
-          const row = {
-            netID, weekNum, category: "recommended",
-            points: recSolved, maxPoints: recTotal,
-            canvasAssignmentId: recAssignmentId, canvasUserId,
-            canvasStatus, outcome,
-            ...(canvasError ? { canvasError } : {}),
-          };
-          cell.recommended = row;
-          flatRows.push(row);
-        }
-
-        // -- Third card --
-        if (!week.thirdCard?.type) {
-          // No third card this week — nothing to push, nothing to log.
-          totals.thirdCard.skippedNoCard++;
-        } else {
-          const tcAssignmentId = week.thirdCard.canvasAssignmentId ?? null;
-          const { earned, total } = computeThirdCardGrade(
-            week.thirdCard,
-            progressByWeek[weekNum]
-          );
-
-          if (tcAssignmentId == null) {
-            const row = {
-              netID, weekNum, category: "thirdCard",
-              subtype: week.thirdCard.type,
-              points: earned, maxPoints: total,
-              canvasAssignmentId: null, canvasUserId,
-              outcome: "skipped-no-assignment",
-            };
-            cell.thirdCard = row;
-            flatRows.push(row);
-            totals.thirdCard.skippedNoAssignment++;
-          } else if (canvasUserId == null) {
-            const row = {
-              netID, weekNum, category: "thirdCard",
-              subtype: week.thirdCard.type,
-              points: earned, maxPoints: total,
-              canvasAssignmentId: tcAssignmentId, canvasUserId: null,
-              outcome: "skipped-no-user",
-            };
-            cell.thirdCard = row;
-            flatRows.push(row);
-            totals.thirdCard.skippedNoUser++;
-          } else {
-            const { canvasStatus, canvasError } = await pushGradeToCanvas({
-              courseId: CANVAS_COURSE_ID,
-              assignmentId: tcAssignmentId,
-              userId: canvasUserId,
-              grade: earned,
-              token,
-            });
-            const outcome = canvasError == null ? "ok" : "failed";
-            if (outcome === "ok") totals.thirdCard.ok++;
-            else totals.thirdCard.failed++;
-            const row = {
-              netID, weekNum, category: "thirdCard",
-              subtype: week.thirdCard.type,
-              points: earned, maxPoints: total,
-              canvasAssignmentId: tcAssignmentId, canvasUserId,
-              canvasStatus, outcome,
-              ...(canvasError ? { canvasError } : {}),
-            };
-            cell.thirdCard = row;
-            flatRows.push(row);
-          }
-        }
-
-        results[netID][weekNum] = cell;
-      }
-    }
-
-    // ---- Write log ----
-    const runId = `push-${new Date()
-      .toISOString()
-      .replace(/[:.]/g, "-")
-      .slice(0, 19)}`;
-    const finishedAt = Date.now();
-    await db.doc(`gradeSyncLog/${runId}`).set({
-      startedAt,
-      finishedAt,
+    const summary = await runPushCanvasGrades({
       triggeredBy: decoded.uid,
-      classId: CLASS_ID,
-      canvasCourseId: CANVAS_COURSE_ID,
-      studentsProcessed: studentsSnap.size,
-      weeksProcessed: weeks.length,
-      totals,
-      results,
-      flatRows,
-      warnings,
+      trigger: "manual",
+      token: canvasToken.value(),
     });
+    res.status(200).json(summary);
+  }
+);
 
-    res.status(200).json({
-      runId,
-      logPath: `gradeSyncLog/${runId}`,
-      studentsProcessed: studentsSnap.size,
-      weeksProcessed: weeks.length,
-      totals,
+// ---- nightlyGradeSync --------------------------------------------------
+//
+// Cloud Scheduler-driven nightly reconciliation. Fires every night at
+// midnight America/Denver (BYU's timezone). Runs the exact same code
+// as pushCanvasGrades, but triggered by the scheduler service account
+// instead of a human-authenticated HTTP call — so there's no auth
+// header to check, and `triggeredBy` is recorded as "system".
+//
+// Purpose: safety net for the real-time hybrid. If pushMyRecentGrade
+// misses a solve (browser closed, network hiccup, function fault),
+// this catches up within 24h. Also picks up third-card grade changes
+// that don't go through the real-time path at all.
+//
+// First-time deploy note: the Cloud Scheduler API must be enabled in
+// the GCP project. Firebase's CLI usually prompts to enable it
+// automatically on first deploy of a scheduled function.
+
+exports.nightlyGradeSync = onSchedule(
+  {
+    schedule: "0 0 * * *", // midnight daily
+    timeZone: "America/Denver",
+    secrets: [canvasToken],
+    region: "us-central1",
+  },
+  async (_event) => {
+    console.log("[nightlyGradeSync] starting");
+    const summary = await runPushCanvasGrades({
+      triggeredBy: "system",
+      trigger: "scheduled",
+      token: canvasToken.value(),
     });
+    console.log("[nightlyGradeSync] done", summary);
   }
 );
 
