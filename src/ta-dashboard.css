@@ -68,6 +68,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.signoff-row:hover {
+  border-color: var(--text-tertiary);
+  background: var(--bg);
 }
 
 .signoff-info {
@@ -248,6 +255,23 @@
 }
 
 /* ---- Student detail ------------------------------------------------ */
+
+.student-back-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.student-back-btn:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
 
 #student-detail-header h1 {
   font-size: 22px;

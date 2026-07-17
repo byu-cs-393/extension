@@ -13,9 +13,15 @@ import { getWeeks, refreshWeeks, classifyWeek, solvedSlugsInWeek } from "./recom
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
-// Currently-selected netID for the student-detail view. Set when the
-// TA clicks a row in the signoff queue or struggling list.
+// Currently-selected netID for the student-detail view. Populated by
+// the router when the hash matches `#students/{netID}`. Never mutated
+// directly — always via a hash change.
 let selectedNetID = null;
+
+// Which view was loaded most recently, so re-entering it doesn't
+// redundantly refetch. Simple string: "signoffs" | "students" | "student".
+let lastLoadedView = null;
+let lastLoadedNetID = null;
 
 // ---- Guard -------------------------------------------------------------
 
@@ -54,6 +60,13 @@ function renderSignoffRow(item, onDecision) {
   article.dataset.netid = item.netID;
   article.dataset.weeknum = String(item.weekNum);
 
+  // The row body (not the Pass/Fail buttons) is a link into the
+  // student's detail page. Clicking the buttons should NOT navigate,
+  // so we stopPropagation on those.
+  article.addEventListener("click", () => {
+    navigateTo(`students/${item.netID}`);
+  });
+
   const info = document.createElement("div");
   info.className = "signoff-info";
 
@@ -72,6 +85,10 @@ function renderSignoffRow(item, onDecision) {
 
   const actions = document.createElement("div");
   actions.className = "signoff-actions";
+  // Stop propagation on the actions container so clicks on the
+  // buttons (or the gap between them) don't bubble up to the row's
+  // "navigate to student" handler.
+  actions.addEventListener("click", (e) => e.stopPropagation());
   const passBtn = document.createElement("button");
   passBtn.className = "btn-pass";
   passBtn.textContent = "Pass";
@@ -467,7 +484,7 @@ function renderStrugglingRow(m) {
   const article = document.createElement("article");
   article.className = "struggling-row";
   article.dataset.netid = m.netID;
-  article.addEventListener("click", () => selectStudent(m.netID));
+  article.addEventListener("click", () => navigateTo(`students/${m.netID}`));
 
   const info = document.createElement("div");
   info.className = "struggling-info";
@@ -537,16 +554,6 @@ async function loadAndRenderStruggling() {
 
 // ---- Student detail view -----------------------------------------------
 
-function selectStudent(netID) {
-  selectedNetID = netID;
-  // Switch view.
-  const buttons = document.querySelectorAll(".ta-nav-btn");
-  const views = document.querySelectorAll(".ta-view");
-  buttons.forEach((b) => b.classList.toggle("active", b.dataset.view === "student"));
-  views.forEach((v) => (v.hidden = v.dataset.view !== "student"));
-  loadAndRenderStudentDetail();
-}
-
 async function loadAndRenderStudentDetail() {
   const header = document.getElementById("student-detail-header");
   const body = document.getElementById("student-detail-body");
@@ -554,11 +561,9 @@ async function loadAndRenderStudentDetail() {
   body.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
 
   if (!selectedNetID) {
+    // Shouldn't happen if routing is correct, but defend against it.
     body.innerHTML = "";
-    header.innerHTML =
-      '<p class="ta-empty">Pick a student from ' +
-      '<a href="#" class="link-to-struggling">Struggling students</a> ' +
-      'to see their details.</p>';
+    header.innerHTML = '<p class="ta-empty">No student selected.</p>';
     return;
   }
 
@@ -569,6 +574,12 @@ async function loadAndRenderStudentDetail() {
       fetchCollection(`students/${selectedNetID}/weekProgress`),
       fetchActivityCountsByStudent(),
     ]);
+
+    if (!student) {
+      renderStudentNotFound(selectedNetID);
+      return;
+    }
+
     const weekProgressByNum = {};
     for (const p of progressDocs) {
       if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
@@ -587,6 +598,40 @@ async function loadAndRenderStudentDetail() {
     console.error("Failed to load student detail:", err);
     body.innerHTML = `<p class="ta-empty">Failed to load: ${err.message}</p>`;
   }
+}
+
+// Renders when the requested netID doesn't have a matching student
+// doc. Common causes: stale bookmark, mistyped URL, or a dummy that
+// hasn't been seeded. Provides a way back so the TA isn't stuck.
+function renderStudentNotFound(netID) {
+  const header = document.getElementById("student-detail-header");
+  const body = document.getElementById("student-detail-body");
+  header.innerHTML = "";
+  body.innerHTML = "";
+
+  const h1 = document.createElement("h1");
+  h1.textContent = "Student not found";
+  header.appendChild(h1);
+
+  const sub = document.createElement("p");
+  sub.className = "student-detail-sub";
+  sub.textContent = `No student doc for netID: ${netID}`;
+  header.appendChild(sub);
+
+  const explain = document.createElement("p");
+  explain.className = "ta-empty";
+  explain.textContent =
+    "If you followed a stale link, that student may have been removed. " +
+    "Otherwise, they may not have completed onboarding yet.";
+  body.appendChild(explain);
+
+  const linkP = document.createElement("p");
+  const link = document.createElement("a");
+  link.href = "#students";
+  link.className = "link-to-struggling";
+  link.textContent = "← Back to Students";
+  linkP.appendChild(link);
+  body.appendChild(linkP);
 }
 
 function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activityCounts, activityPerWeek }) {
@@ -734,36 +779,114 @@ function renderWeekBreakdownRow(week, student, progress, weekActivity) {
   return row;
 }
 
-// ---- Nav ---------------------------------------------------------------
+// ---- Routing -----------------------------------------------------------
+//
+// Hash-based single-page routing. The three routable states:
+//
+//   #signoffs              → signoff queue view (top-level)
+//   #students              → students list (top-level)
+//   #students/{netID}      → student detail (child of Students)
+//
+// Navigation triggers:
+//   - Nav-bar buttons set `location.hash` to their tab's route.
+//   - Row clicks (signoff row, students row) set the hash to
+//     `students/{netID}`.
+//   - The in-view "← Back to Students" button sets the hash to
+//     `students`.
+//   - The browser back/forward buttons trigger `hashchange` natively.
+//
+// Route() is the single point that reads the hash and syncs both:
+//   1. Which section is visible + which nav tab is highlighted.
+//   2. Which loader (data-fetch) runs.
+
+const ROUTES = ["signoffs", "students"];
+
+function parseHash() {
+  const raw = location.hash.replace(/^#/, "");
+  if (!raw) return { view: "signoffs" };
+
+  const [head, ...rest] = raw.split("/");
+  if (head === "students" && rest.length > 0 && rest[0]) {
+    return { view: "student", netID: rest[0] };
+  }
+  if (ROUTES.includes(head)) {
+    return { view: head };
+  }
+  // Unknown route — normalize to signoffs.
+  return { view: "signoffs" };
+}
+
+function navigateTo(path) {
+  // Setting hash pushes to history and fires hashchange. If the value
+  // is unchanged, no-op — no accidental double-render.
+  location.hash = path;
+}
+
+function showViewSection(view) {
+  document.querySelectorAll(".ta-view").forEach((el) => {
+    el.hidden = el.dataset.view !== view;
+  });
+}
+
+function setActiveTab(view) {
+  // Student-detail is a child of Students — highlight the parent tab.
+  const parent = view === "student" ? "students" : view;
+  document.querySelectorAll(".ta-nav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === parent);
+  });
+}
+
+async function route() {
+  const { view, netID } = parseHash();
+  showViewSection(view);
+  setActiveTab(view);
+
+  if (view === "signoffs") {
+    if (lastLoadedView !== "signoffs") await renderSignoffQueue();
+    lastLoadedView = "signoffs";
+  } else if (view === "students") {
+    if (lastLoadedView !== "students") await loadAndRenderStruggling();
+    lastLoadedView = "students";
+  } else if (view === "student") {
+    // If netID changed, refresh. Otherwise reuse what's on screen.
+    if (netID !== lastLoadedNetID) {
+      selectedNetID = netID;
+      lastLoadedNetID = netID;
+      await loadAndRenderStudentDetail();
+    }
+    lastLoadedView = "student";
+  }
+}
+
+// ---- Wiring ------------------------------------------------------------
 
 function wireNav() {
-  const buttons = document.querySelectorAll(".ta-nav-btn");
-  const views = document.querySelectorAll(".ta-view");
-  buttons.forEach((btn) => {
+  document.querySelectorAll(".ta-nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (btn.disabled) return;
-      buttons.forEach((b) => b.classList.toggle("active", b === btn));
-      views.forEach((v) => (v.hidden = v.dataset.view !== btn.dataset.view));
-      // Lazy-load views on first switch.
-      if (btn.dataset.view === "struggling") loadAndRenderStruggling();
-      if (btn.dataset.view === "student") loadAndRenderStudentDetail();
+      navigateTo(btn.dataset.view);
     });
   });
 
   // Sort dropdown — resort without refetching.
-  document.getElementById("struggling-sort")?.addEventListener("change", reSortStruggling);
+  document
+    .getElementById("struggling-sort")
+    ?.addEventListener("change", reSortStruggling);
 
-  // The empty-state link inside the detail view — clicking it should
-  // navigate to struggling.
+  // Back button on the student detail view.
+  document.getElementById("student-back-btn")?.addEventListener("click", () => {
+    navigateTo("students");
+  });
+
+  // Any anchor with class `link-to-struggling` navigates to students.
   document.addEventListener("click", (e) => {
     const link = e.target.closest(".link-to-struggling");
     if (!link) return;
     e.preventDefault();
-    const strugglingBtn = document.querySelector(
-      '.ta-nav-btn[data-view="struggling"]'
-    );
-    strugglingBtn?.click();
+    navigateTo("students");
   });
+
+  window.addEventListener("hashchange", route);
 }
 
 // ---- Bootstrap ---------------------------------------------------------
@@ -777,5 +900,13 @@ function wireNav() {
   });
 
   wireNav();
-  renderSignoffQueue();
+
+  // If no hash on entry, seed with #signoffs so the first entry lands
+  // in the history (so the browser back button has somewhere to go).
+  // Use replaceState so we don't end up with an empty "" hash sitting
+  // one step behind in history.
+  if (!location.hash) {
+    history.replaceState(null, "", "#signoffs");
+  }
+  route();
 })();

@@ -22,8 +22,7 @@
       <main>
         <nav class="ta-nav">
           <button class="ta-nav-btn active" data-view="signoffs">Signoff queue</button>
-          <button class="ta-nav-btn" data-view="struggling">Struggling students</button>
-          <button class="ta-nav-btn" data-view="student">Student detail</button>
+          <button class="ta-nav-btn" data-view="students">Students</button>
         </nav>
 
         <!-- Signoff queue view -->
@@ -34,8 +33,8 @@
           </div>
         </section>
 
-        <!-- Struggling students view -->
-        <section class="ta-view" data-view="struggling" hidden>
+        <!-- Students list view -->
+        <section class="ta-view" data-view="students" hidden>
           <h1>Students</h1>
           <div class="struggling-controls">
             <label for="struggling-sort">Sort by</label>
@@ -54,15 +53,12 @@
           </div>
         </section>
 
-        <!-- Student detail view -->
+        <!-- Student detail view — child of Students, not a top-level nav item -->
         <section class="ta-view" data-view="student" hidden>
-          <div id="student-detail-header">
-            <p class="ta-empty">
-              Pick a student from
-              <a href="#" class="link-to-struggling">Struggling students</a>
-              to see their details.
-            </p>
-          </div>
+          <button type="button" class="student-back-btn" id="student-back-btn">
+            ← Back to Students
+          </button>
+          <div id="student-detail-header"></div>
           <div id="student-detail-body"></div>
         </section>
       </main>
