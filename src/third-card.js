@@ -36,7 +36,7 @@
 //
 //   When no progress doc exists, the card renders in its default
 //   "unattempted" state for that type.
-import { fetchCollection } from "./firestore.js";
+import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
 import {
   startAttempt,
   endActiveAttempt,
@@ -90,7 +90,7 @@ export function createThirdCardSection(thirdCard, progress, weekStatus, ctx = {}
   if (!thirdCard || !thirdCard.type) return null;
   switch (thirdCard.type) {
     case "topicExam":
-      return renderTopicExam(thirdCard, progress, weekStatus);
+      return renderTopicExam(thirdCard, progress, weekStatus, ctx);
     case "onlineAssessment":
       return renderOnlineAssessment(thirdCard, progress, weekStatus, ctx);
     case "mockInterview":
@@ -149,7 +149,7 @@ function addPrimaryButton(article, label, onClick) {
 
 // ---- Topic Exam ---------------------------------------------------------
 
-function renderTopicExam(card, progress, weekStatus) {
+function renderTopicExam(card, progress, weekStatus, ctx) {
   const article = makeCard();
   addTitle(article, `Topic Exam · ${card.topic}`);
 
@@ -177,8 +177,51 @@ function renderTopicExam(card, progress, weekStatus) {
     return article;
   }
   const label = status === "failed" ? "Request re-signoff" : "Request signoff";
-  addPrimaryButton(article, label, () => stubAction("Signoff"));
+  addPrimaryButton(article, label, async () => {
+    if (!ctx?.netID || !Number.isFinite(ctx?.weekNum)) {
+      stubAction("Signoff");
+      return;
+    }
+    try {
+      await requestTopicExamSignoff({
+        netID: ctx.netID,
+        weekNum: ctx.weekNum,
+        existingProgress: progress,
+      });
+    } catch (err) {
+      console.error("[CS 393 Buddy] Failed to request signoff:", err);
+      alert("Couldn't submit your signoff request. Try again in a moment.");
+    }
+  });
   return article;
+}
+
+// Records a signoff request against the topic exam by writing/patching
+// the student's weekProgress doc. Storage listener on the dashboard
+// re-renders the card into the "⏳ Signoff requested" state.
+async function requestTopicExamSignoff({ netID, weekNum, existingProgress }) {
+  const now = Date.now();
+  // Preserve any fields already on the doc (e.g., a prior signoffAt
+  // from a "failed" attempt so we can see the retry chain later).
+  const existing = existingProgress
+    ? existingProgress
+    : (await fetchDoc(`students/${netID}/weekProgress/${weekNum}`)) ?? {};
+  const newProgress = {
+    ...existing,
+    type: "topicExam",
+    weekNum,
+    status: "requested",
+    requestedAt: now,
+  };
+  await patchDoc(`students/${netID}/weekProgress/${weekNum}`, newProgress);
+
+  // Update the local cache so the storage listener re-renders
+  // immediately — same pattern as endActiveAttempt in oa-session.js.
+  const cached = await chrome.storage.local.get(PROGRESS_CACHE_KEY);
+  const bundle = cached[PROGRESS_CACHE_KEY] ?? { progress: {} };
+  bundle.progress = { ...(bundle.progress ?? {}), [weekNum]: newProgress };
+  bundle.syncedAt = Date.now();
+  await chrome.storage.local.set({ [PROGRESS_CACHE_KEY]: bundle });
 }
 
 // ---- Online Assessment --------------------------------------------------
