@@ -240,13 +240,18 @@
 
 .weekly-row {
   display: grid;
-  grid-template-columns: 90px 1fr 1fr;
+  grid-template-columns: 80px 1fr 1fr 1fr;
   gap: 12px;
   padding: 10px 14px;
   background: var(--card-bg);
   border: 1px solid var(--divider);
   border-radius: 6px;
   font-size: 13px;
+}
+
+.weekly-cell-activity {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 
 .weekly-label {

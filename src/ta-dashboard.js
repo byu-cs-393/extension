@@ -361,6 +361,29 @@ async function fetchActivityCountsByStudent() {
   return byStudent;
 }
 
+// For a single student, buckets their activity events into per-week
+// counts (weekNum → { opens, passes, fails }). Uses the week catalog
+// to decide which week each event lands in based on timestamp.
+async function fetchActivityPerWeek(netID, weeks) {
+  const events = await fetchCollection("activity");
+  const byWeek = {};
+  for (const e of events) {
+    if (e?.studentNetID !== netID) continue;
+    if (typeof e?.timestamp !== "number") continue;
+    const week = weeks.find(
+      (w) => e.timestamp >= w.startDate && e.timestamp < w.endDate
+    );
+    if (!week) continue;
+    const wn = week.weekNum;
+    const bucket = byWeek[wn] ?? { opens: 0, passes: 0, fails: 0 };
+    if (e.eventType === "open_problem") bucket.opens++;
+    else if (e.eventType === "submit_pass") bucket.passes++;
+    else if (e.eventType === "submit_fail") bucket.fails++;
+    byWeek[wn] = bucket;
+  }
+  return byWeek;
+}
+
 function renderStruggling({ rows, weeks }) {
   const container = document.getElementById("struggling-list");
   container.innerHTML = "";
@@ -501,6 +524,7 @@ async function loadAndRenderStudentDetail() {
     for (const p of progressDocs) {
       if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
     }
+    const activityPerWeek = await fetchActivityPerWeek(selectedNetID, weeks);
 
     renderStudentDetail({
       student,
@@ -508,6 +532,7 @@ async function loadAndRenderStudentDetail() {
       weeks,
       weekProgressByNum,
       activityCounts: activityByStudent[selectedNetID] ?? { opens: 0, passes: 0, fails: 0 },
+      activityPerWeek,
     });
   } catch (err) {
     console.error("Failed to load student detail:", err);
@@ -515,7 +540,7 @@ async function loadAndRenderStudentDetail() {
   }
 }
 
-function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activityCounts }) {
+function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activityCounts, activityPerWeek }) {
   const header = document.getElementById("student-detail-header");
   const body = document.getElementById("student-detail-body");
   header.innerHTML = "";
@@ -585,12 +610,19 @@ function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activit
   const table = document.createElement("div");
   table.className = "weekly-breakdown";
   for (const week of visible) {
-    table.appendChild(renderWeekBreakdownRow(week, student, weekProgressByNum[week.weekNum]));
+    table.appendChild(
+      renderWeekBreakdownRow(
+        week,
+        student,
+        weekProgressByNum[week.weekNum],
+        activityPerWeek?.[week.weekNum]
+      )
+    );
   }
   body.appendChild(table);
 }
 
-function renderWeekBreakdownRow(week, student, progress) {
+function renderWeekBreakdownRow(week, student, progress, weekActivity) {
   const row = document.createElement("div");
   row.className = "weekly-row";
 
@@ -634,6 +666,21 @@ function renderWeekBreakdownRow(week, student, progress) {
     else if (statusText === "failed") tcCell.classList.add("cell-low");
   }
   row.appendChild(tcCell);
+
+  // Per-week activity — visits + passes/fails from the activity log,
+  // scoped to this week's window.
+  const visitCell = document.createElement("div");
+  visitCell.className = "weekly-cell weekly-cell-activity";
+  const opens = weekActivity?.opens ?? 0;
+  const passes = weekActivity?.passes ?? 0;
+  const fails = weekActivity?.fails ?? 0;
+  if (opens === 0 && passes === 0 && fails === 0) {
+    visitCell.textContent = "no visits";
+    visitCell.classList.add("cell-none");
+  } else {
+    visitCell.textContent = `${opens} visits · ${passes}✓ · ${fails}✗`;
+  }
+  row.appendChild(visitCell);
 
   return row;
 }

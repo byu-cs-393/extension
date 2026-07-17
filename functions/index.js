@@ -1126,12 +1126,15 @@ exports.seedDummyStudents = onRequest(
           if (rand() < persona.solveRate) {
             // Timestamp within the week's window.
             let ts = week.startDate + rand() * (week.endDate - week.startDate);
-            // Clamp to persona's "last active" cutoff so their most
-            // recent solve reflects their staleDays.
-            if (ts > staleCutoff) {
-              ts = staleCutoff - rand() * ONE_DAY_MS;
-            }
-            if (ts < week.startDate) ts = week.startDate;
+            // Enforce staleness: if this timestamp is more recent than
+            // the persona's activity cutoff, cap it. But then we might
+            // be OUTSIDE the week's window (a persona who stopped
+            // being active 12 days ago shouldn't have any solves in a
+            // week that only just started). In that case, DROP the
+            // solve entirely — that's the honest representation of
+            // "they were too stale to have engaged with this week."
+            if (ts > staleCutoff) ts = staleCutoff;
+            if (ts < week.startDate || ts >= week.endDate) continue;
             solvedProblems[p.slug] = Math.floor(ts);
           }
         }
