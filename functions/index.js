@@ -1020,3 +1020,160 @@ exports.pushMyRecentGrade = onRequest(
     });
   }
 );
+
+// ---- seedDummyStudents -------------------------------------------------
+//
+// Dev-only helper. Populates the students collection with a handful of
+// synthetic personas so the TA dashboard's struggling-students +
+// student-detail views have realistic data to render.
+//
+// Each persona gets a solvedProblems map derived from the actual week
+// catalog: for each week's problem list, the persona "solves" a
+// random subset sized by their solveRate, with timestamps sprinkled
+// through that week's window (capped so their most recent activity
+// matches their staleDays value). A subset also get a pending
+// signoff request so the queue view has something to display.
+//
+// Auth: instructor allowlist (same as dryRunGrades). Writes via
+// Admin SDK, bypassing the students-doc write rule (which only
+// allows the owner) — that's why this needs to be a Cloud Function
+// rather than a browser snippet.
+//
+// Idempotent: re-running overwrites the same personas with fresh
+// randomized data. Personas use the "dummy*" netID prefix so
+// filtering them out later is trivial.
+
+const DUMMY_PERSONAS = [
+  { netID: "dummya", name: "Alice Solver",        note: "engaged",              solveRate: 0.95, staleDays: 0,  signoff: false },
+  { netID: "dummyb", name: "Bob Balanced",        note: "steady progress",      solveRate: 0.75, staleDays: 1,  signoff: false },
+  { netID: "dummyc", name: "Carol Struggling",    note: "",                     solveRate: 0.35, staleDays: 4,  signoff: false },
+  { netID: "dummyd", name: "Dan Dropped Off",     note: "",                     solveRate: 0.60, staleDays: 12, signoff: false },
+  { netID: "dummye", name: "Eve Just Started",    note: "just joined",          solveRate: 0.15, staleDays: 0,  signoff: false },
+  { netID: "dummyf", name: "Frank Pending",       note: "waiting on signoff",   solveRate: 0.80, staleDays: 1,  signoff: true  },
+  { netID: "dummyg", name: "Grace Consistent",    note: "",                     solveRate: 0.85, staleDays: 0,  signoff: false },
+  { netID: "dummyh", name: "Henry Hesitant",      note: "asks lots of questions", solveRate: 0.45, staleDays: 6,  signoff: true  },
+];
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Deterministic-ish pseudo-random so re-runs produce recognizable
+// data. Simple mulberry32; seeded by a hash of netID + slug.
+function seededRand(seedStr) {
+  let h = 2166136261;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 16777619);
+  }
+  let a = h >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+exports.seedDummyStudents = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // Auth: instructor allowlist.
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    if (!INSTRUCTOR_ALLOWLIST.includes(decoded.uid)) {
+      res.status(403).json({
+        error: `${decoded.uid} is not on the instructor allowlist.`,
+        code: "permission-denied",
+      });
+      return;
+    }
+
+    const db = getFirestore();
+    const startedAt = Date.now();
+
+    // Read week catalog to know what problems + windows exist.
+    const weeksSnap = await db.collection(`classes/${CLASS_ID}/weeks`).get();
+    const weeks = weeksSnap.docs
+      .map((d) => d.data())
+      .filter((w) => Number.isFinite(w?.startDate) && Number.isFinite(w?.endDate));
+
+    const now = Date.now();
+    const summary = [];
+
+    for (const persona of DUMMY_PERSONAS) {
+      const rand = seededRand(persona.netID);
+      const staleCutoff = now - persona.staleDays * ONE_DAY_MS;
+      const solvedProblems = {};
+
+      for (const week of weeks) {
+        const problems = Array.isArray(week.problems) ? week.problems : [];
+        for (const p of problems) {
+          if (!p?.slug) continue;
+          if (rand() < persona.solveRate) {
+            // Timestamp within the week's window.
+            let ts = week.startDate + rand() * (week.endDate - week.startDate);
+            // Clamp to persona's "last active" cutoff so their most
+            // recent solve reflects their staleDays.
+            if (ts > staleCutoff) {
+              ts = staleCutoff - rand() * ONE_DAY_MS;
+            }
+            if (ts < week.startDate) ts = week.startDate;
+            solvedProblems[p.slug] = Math.floor(ts);
+          }
+        }
+      }
+
+      await db.doc(`students/${persona.netID}`).set({
+        name: persona.name,
+        note: persona.note,
+        leetcodeUsername: `${persona.netID}_lc`,
+        solvedProblems,
+      });
+
+      // Some personas get a pending signoff request on a random
+      // topic-exam week so the signoff queue has variety.
+      if (persona.signoff) {
+        const topicExamWeek = weeks.find(
+          (w) => w.thirdCard?.type === "topicExam" && w.startDate <= now
+        );
+        if (topicExamWeek) {
+          await db.doc(
+            `students/${persona.netID}/weekProgress/${topicExamWeek.weekNum}`
+          ).set({
+            type: "topicExam",
+            weekNum: topicExamWeek.weekNum,
+            status: "requested",
+            requestedAt: now - Math.floor(rand() * 5 * ONE_DAY_MS),
+          });
+        }
+      }
+
+      summary.push({
+        netID: persona.netID,
+        name: persona.name,
+        solves: Object.keys(solvedProblems).length,
+        weekProgress: persona.signoff ? 1 : 0,
+      });
+    }
+
+    res.status(200).json({
+      seeded: DUMMY_PERSONAS.length,
+      elapsedMs: Date.now() - startedAt,
+      summary,
+    });
+  }
+);

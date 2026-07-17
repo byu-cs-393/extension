@@ -57,6 +57,13 @@
           "serviceId": "pushmyrecentgrade",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/seedDummyStudents",
+        "run": {
+          "serviceId": "seeddummystudents",
+          "region": "us-central1"
+        }
       }
     ]
   }
