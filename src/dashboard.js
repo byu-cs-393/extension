@@ -1,4 +1,5 @@
 import { fetchStudent } from "./firestore.js";
+import { getRole } from "./auth.js";
 import {
   getWeeks,
   refreshWeeks,
@@ -447,6 +448,20 @@ function wireFullCourseButton() {
   });
 }
 
+// TA-only entry point. Hidden by default in HTML; revealed here if
+// the signed-in user's ID token carries `role: "ta"`. Clicking opens
+// the TA dashboard in the same tab.
+async function wireTaDashboardButton() {
+  const btn = document.getElementById("ta-dashboard-btn");
+  if (!btn) return;
+  const role = await getRole();
+  if (role !== "ta") return; // stays hidden
+  btn.hidden = false;
+  btn.addEventListener("click", () => {
+    window.location.href = chrome.runtime.getURL("ta-dashboard.html");
+  });
+}
+
 // ---- Bootstrap ---------------------------------------------------------
 
 (async () => {
@@ -458,5 +473,6 @@ function wireFullCourseButton() {
   loadAndRender(netID);
   wireProfileMenu();
   wireFullCourseButton();
+  wireTaDashboardButton();
   initWeeks(netID);
 })();

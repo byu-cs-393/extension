@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CS 393 Buddy · TA Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css" />
+    <link rel="stylesheet" href="ta-dashboard.css" />
+  </head>
+  <body>
+    <div class="dashboard">
+      <header class="dashboard-header">
+        <div class="brand-block">
+          <span class="brand">CS 393 Buddy</span>
+          <span class="separator" aria-hidden="true">·</span>
+          <span class="term">TA Dashboard</span>
+        </div>
+        <div class="actions">
+          <button class="header-btn" id="back-to-student-btn">← Student view</button>
+        </div>
+      </header>
+
+      <main>
+        <nav class="ta-nav">
+          <button class="ta-nav-btn active" data-view="signoffs">Signoff queue</button>
+          <button class="ta-nav-btn" data-view="struggling" disabled>Struggling students</button>
+          <button class="ta-nav-btn" data-view="student" disabled>Student detail</button>
+        </nav>
+
+        <!-- Signoff queue view -->
+        <section class="ta-view" data-view="signoffs">
+          <h1>Pending signoff requests</h1>
+          <div id="signoff-list" class="signoff-list">
+            <p class="ta-empty">Loading…</p>
+          </div>
+        </section>
+
+        <!-- Placeholders — future views -->
+        <section class="ta-view" data-view="struggling" hidden>
+          <h1>Struggling students</h1>
+          <p class="ta-empty">Coming soon.</p>
+        </section>
+
+        <section class="ta-view" data-view="student" hidden>
+          <h1>Student detail</h1>
+          <p class="ta-empty">Coming soon.</p>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="ta-dashboard.js"></script>
+  </body>
+</html>

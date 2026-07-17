@@ -30,10 +30,15 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ---- students/{netID} ----------------------------------------------
-    // Each student can only read and write their own doc. Schema is
-    // also validated.
+    // Read: student themselves OR anyone with role: "ta" (needed for
+    // the TA dashboard's struggling-student + student-detail views).
+    // Write: student themselves only. TAs don't currently need to
+    // mutate student docs directly — signoff writes live one level
+    // deeper on weekProgress.
     match /students/{netID} {
-      allow read: if request.auth != null && request.auth.uid == netID;
+      allow read: if request.auth != null
+                    && (request.auth.uid == netID
+                        || request.auth.token.role == 'ta');
       allow write: if request.auth != null
                     && request.auth.uid == netID
                     && isValidNetID(netID)
@@ -51,11 +56,11 @@ service cloud.firestore {
     }
 
     // ---- activity/{eventId} --------------------------------------------
-    // Append-only event log. Only the authenticated student can write
-    // events tagged with their own netID, and only via create (never
-    // update/delete).
+    // Append-only event log. Students can only create events tagged
+    // with their own netID. TAs can read for the student-detail
+    // timeline view.
     match /activity/{eventId} {
-      allow read: if false;
+      allow read: if request.auth != null && request.auth.token.role == 'ta';
       allow create: if request.auth != null
                     && request.auth.uid == request.resource.data.studentNetID
                     && isValidActivityEvent(request.resource.data);
@@ -130,9 +135,15 @@ service cloud.firestore {
     // delete — running it through the schema validator would always
     // fail. Useful for reset/test flows during development.
     match /students/{netID}/weekProgress/{weekNum} {
-      allow read: if request.auth != null && request.auth.uid == netID;
+      // Read: owner OR TA (needed for the signoff queue).
+      allow read: if request.auth != null
+                    && (request.auth.uid == netID
+                        || request.auth.token.role == 'ta');
+      // Create/update: owner OR TA (TAs use writes here to record
+      // signoff outcomes — passed/failed status on topic exams).
       allow create, update: if request.auth != null
-                             && request.auth.uid == netID
+                             && (request.auth.uid == netID
+                                 || request.auth.token.role == 'ta')
                              && isValidWeekProgress(request.resource.data, weekNum);
       allow delete: if request.auth != null && request.auth.uid == netID;
     }

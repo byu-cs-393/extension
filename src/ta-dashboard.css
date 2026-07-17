@@ -1,0 +1,131 @@
+/* TA-specific styles. dashboard.css handles the shared header, cards,
+   and utility classes; this file layers on TA-only bits. */
+
+.ta-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.ta-nav-btn {
+  background: transparent;
+  border: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.ta-nav-btn:hover:not([disabled]) {
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+.ta-nav-btn.active {
+  background: var(--accent-bg, #eff6ff);
+  color: var(--accent, #2563eb);
+}
+
+.ta-nav-btn[disabled] {
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+}
+
+.ta-view[hidden] {
+  display: none;
+}
+
+.ta-view h1 {
+  font-size: 20px;
+  margin: 0 0 16px 0;
+}
+
+.ta-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+  margin: 24px 0;
+}
+
+/* ---- Signoff queue --------------------------------------------------- */
+
+.signoff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signoff-row {
+  background: var(--card-bg);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.signoff-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.signoff-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signoff-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.signoff-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.signoff-actions .btn-pass {
+  background: #16a34a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.signoff-actions .btn-pass:hover {
+  background: #15803d;
+}
+
+.signoff-actions .btn-fail {
+  background: transparent;
+  color: var(--error, #b91c1c);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.signoff-actions .btn-fail:hover {
+  border-color: var(--error, #b91c1c);
+}
+
+.signoff-actions button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
