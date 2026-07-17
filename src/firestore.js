@@ -116,6 +116,17 @@ function unwrapFirestoreValue(valueObj) {
   if (type === "integerValue") {
     return Number(value);
   }
+  // Firestore's timestampValue comes back as an RFC 3339 string like
+  // "2026-07-17T15:30:00Z". Every consumer wants ms-since-epoch to
+  // compare against startDate/endDate, so convert here — same
+  // reasoning as integerValue above. This unifies the two paths
+  // (real activity events use timestampValue, seeded events use
+  // integerValue) so downstream code doesn't need to know which
+  // wrote a given field.
+  if (type === "timestampValue") {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   return value;
 }
 

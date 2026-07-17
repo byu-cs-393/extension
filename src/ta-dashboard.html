@@ -36,10 +36,19 @@
 
         <!-- Struggling students view -->
         <section class="ta-view" data-view="struggling" hidden>
-          <h1>Struggling students</h1>
-          <p class="ta-help">
-            Sorted by risk. Click any row to see that student's per-week breakdown.
-          </p>
+          <h1>Students</h1>
+          <div class="struggling-controls">
+            <label for="struggling-sort">Sort by</label>
+            <select id="struggling-sort" class="struggling-sort">
+              <option value="risk">Risk score (default)</option>
+              <option value="inactive">Least recent activity</option>
+              <option value="currentWeek">Fewest solves this week</option>
+              <option value="overall">Lowest overall completion</option>
+              <option value="visits">Fewest visits</option>
+              <option value="name">Name (A–Z)</option>
+            </select>
+          </div>
+          <p class="ta-help">Click any row to see that student's per-week breakdown.</p>
           <div id="struggling-list" class="struggling-list">
             <p class="ta-empty">Loading…</p>
           </div>

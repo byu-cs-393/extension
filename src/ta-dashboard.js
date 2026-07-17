@@ -188,6 +188,12 @@ function unwrapFirestoreValue(valueObj) {
   if (type === "integerValue") {
     return Number(value);
   }
+  // timestampValue → ms-since-epoch, matching integerValue's numeric
+  // representation. See firestore.js for the reasoning.
+  if (type === "timestampValue") {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   return value;
 }
 
@@ -384,6 +390,42 @@ async function fetchActivityPerWeek(netID, weeks) {
   return byWeek;
 }
 
+// Cached across renders so re-sorts don't require re-fetching.
+let cachedStrugglingMetrics = null;
+
+function currentSortMode() {
+  return document.getElementById("struggling-sort")?.value ?? "risk";
+}
+
+function sortMetrics(metrics, mode) {
+  const arr = [...metrics];
+  switch (mode) {
+    case "inactive":
+      // Least recent first = highest daysSinceActive first
+      arr.sort((a, b) => b.daysSinceActive - a.daysSinceActive);
+      break;
+    case "currentWeek":
+      arr.sort((a, b) => a.currentRatio - b.currentRatio);
+      break;
+    case "overall":
+      arr.sort((a, b) => a.overallRatio - b.overallRatio);
+      break;
+    case "visits":
+      arr.sort(
+        (a, b) => (a.activityCounts?.opens ?? 0) - (b.activityCounts?.opens ?? 0)
+      );
+      break;
+    case "name":
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+      break;
+    case "risk":
+    default:
+      arr.sort((a, b) => b.risk - a.risk);
+      break;
+  }
+  return arr;
+}
+
 function renderStruggling({ rows, weeks }) {
   const container = document.getElementById("struggling-list");
   container.innerHTML = "";
@@ -395,7 +437,7 @@ function renderStruggling({ rows, weeks }) {
     return;
   }
 
-  const metrics = rows.map((r) => ({
+  cachedStrugglingMetrics = rows.map((r) => ({
     ...computeMetrics({
       student: r.student,
       netID: r.netID,
@@ -404,9 +446,19 @@ function renderStruggling({ rows, weeks }) {
     }),
     activityCounts: r.activityCounts,
   }));
-  metrics.sort((a, b) => b.risk - a.risk);
 
-  for (const m of metrics) {
+  const sorted = sortMetrics(cachedStrugglingMetrics, currentSortMode());
+  for (const m of sorted) {
+    container.appendChild(renderStrugglingRow(m));
+  }
+}
+
+function reSortStruggling() {
+  if (!cachedStrugglingMetrics) return;
+  const container = document.getElementById("struggling-list");
+  container.innerHTML = "";
+  const sorted = sortMetrics(cachedStrugglingMetrics, currentSortMode());
+  for (const m of sorted) {
     container.appendChild(renderStrugglingRow(m));
   }
 }
@@ -420,33 +472,26 @@ function renderStrugglingRow(m) {
   const info = document.createElement("div");
   info.className = "struggling-info";
 
+  // Name row — pending-signoff badge (if any) is the only status
+  // marker up here now. Everything else is quantitative in the meta
+  // line below, so the flags-that-duplicate-the-meta-line are gone.
   const nameLine = document.createElement("div");
   nameLine.className = "struggling-name";
-  nameLine.textContent = `${m.name} (${m.netID})`;
+  const nameSpan = document.createElement("span");
+  nameSpan.textContent = `${m.name} (${m.netID})`;
+  nameLine.appendChild(nameSpan);
+  const signoffFlag = m.flags.find((f) => f.startsWith("Signoff pending"));
+  if (signoffFlag) {
+    const pill = document.createElement("span");
+    pill.className = "flag-pill flag-signoff";
+    pill.textContent = signoffFlag;
+    nameLine.appendChild(pill);
+  }
   info.appendChild(nameLine);
 
-  if (m.flags.length > 0) {
-    const flagRow = document.createElement("div");
-    flagRow.className = "struggling-flags";
-    for (const f of m.flags) {
-      const pill = document.createElement("span");
-      pill.className = "flag-pill";
-      pill.textContent = f;
-      flagRow.appendChild(pill);
-    }
-    info.appendChild(flagRow);
-  } else {
-    const okRow = document.createElement("div");
-    okRow.className = "struggling-flags";
-    const ok = document.createElement("span");
-    ok.className = "flag-pill flag-ok";
-    ok.textContent = "On track";
-    okRow.appendChild(ok);
-    info.appendChild(okRow);
-  }
-
-  const meta = document.createElement("div");
-  meta.className = "struggling-meta";
+  // Two meta lines: activity summary, then engagement summary.
+  const meta1 = document.createElement("div");
+  meta1.className = "struggling-meta";
   const lastActiveStr =
     m.daysSinceActive === Infinity
       ? "no activity yet"
@@ -456,12 +501,16 @@ function renderStrugglingRow(m) {
       ? "no current week"
       : `this week ${m.currentSolved}/${m.currentTotal}`;
   const overallStr = `overall ${m.listedSolved}/${m.listedTotal}`;
+  meta1.textContent = `${lastActiveStr}  ·  ${currentStr}  ·  ${overallStr}`;
+  info.appendChild(meta1);
+
+  const meta2 = document.createElement("div");
+  meta2.className = "struggling-meta struggling-meta-numbers";
   const opens = m.activityCounts?.opens ?? 0;
   const passes = m.activityCounts?.passes ?? 0;
   const fails = m.activityCounts?.fails ?? 0;
-  const visitsStr = `${opens} visits · ${passes} passes · ${fails} fails`;
-  meta.textContent = `${lastActiveStr} · ${currentStr} · ${overallStr} · ${visitsStr}`;
-  info.appendChild(meta);
+  meta2.textContent = `${opens} visits  ·  ${passes}✓  ·  ${fails}✗`;
+  info.appendChild(meta2);
 
   article.appendChild(info);
 
@@ -700,6 +749,9 @@ function wireNav() {
       if (btn.dataset.view === "student") loadAndRenderStudentDetail();
     });
   });
+
+  // Sort dropdown — resort without refetching.
+  document.getElementById("struggling-sort")?.addEventListener("change", reSortStruggling);
 
   // The empty-state link inside the detail view — clicking it should
   // navigate to struggling.
