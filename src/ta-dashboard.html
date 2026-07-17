@@ -22,8 +22,8 @@
       <main>
         <nav class="ta-nav">
           <button class="ta-nav-btn active" data-view="signoffs">Signoff queue</button>
-          <button class="ta-nav-btn" data-view="struggling" disabled>Struggling students</button>
-          <button class="ta-nav-btn" data-view="student" disabled>Student detail</button>
+          <button class="ta-nav-btn" data-view="struggling">Struggling students</button>
+          <button class="ta-nav-btn" data-view="student">Student detail</button>
         </nav>
 
         <!-- Signoff queue view -->
@@ -34,15 +34,27 @@
           </div>
         </section>
 
-        <!-- Placeholders — future views -->
+        <!-- Struggling students view -->
         <section class="ta-view" data-view="struggling" hidden>
           <h1>Struggling students</h1>
-          <p class="ta-empty">Coming soon.</p>
+          <p class="ta-help">
+            Sorted by risk. Click any row to see that student's per-week breakdown.
+          </p>
+          <div id="struggling-list" class="struggling-list">
+            <p class="ta-empty">Loading…</p>
+          </div>
         </section>
 
+        <!-- Student detail view -->
         <section class="ta-view" data-view="student" hidden>
-          <h1>Student detail</h1>
-          <p class="ta-empty">Coming soon.</p>
+          <div id="student-detail-header">
+            <p class="ta-empty">
+              Pick a student from
+              <a href="#" class="link-to-struggling">Struggling students</a>
+              to see their details.
+            </p>
+          </div>
+          <div id="student-detail-body"></div>
         </section>
       </main>
     </div>

@@ -9,9 +9,13 @@
 
 import { getRole } from "./auth.js";
 import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
-import { getWeeks, refreshWeeks } from "./recommended.js";
+import { getWeeks, refreshWeeks, classifyWeek, solvedSlugsInWeek } from "./recommended.js";
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+// Currently-selected netID for the student-detail view. Set when the
+// TA clicks a row in the signoff queue or struggling list.
+let selectedNetID = null;
 
 // ---- Guard -------------------------------------------------------------
 
@@ -213,6 +217,381 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
   }
 }
 
+// ---- Struggling students view ------------------------------------------
+
+const INACTIVE_DAYS_THRESHOLD = 7;
+const CURRENT_WEEK_LOW_THRESHOLD = 0.5;
+const OVERALL_LOW_THRESHOLD = 0.5;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Computes per-student engagement metrics from raw student + week data.
+// All metrics are relative to weeks that are past or current — future
+// weeks are excluded so they don't drag down the "overall" number.
+function computeMetrics({ student, netID, weekProgressByNum, weeks }) {
+  const now = Date.now();
+  const solves = student?.solvedProblems ?? {};
+  const visibleWeeks = weeks.filter((w) => w.startDate <= now);
+
+  // Last active = latest solve timestamp anywhere.
+  let lastActive = 0;
+  for (const ts of Object.values(solves)) {
+    if (typeof ts === "number" && ts > lastActive) lastActive = ts;
+  }
+  const daysSinceActive =
+    lastActive === 0 ? Infinity : (now - lastActive) / ONE_DAY_MS;
+
+  // Overall: total solved-from-listed across past+current, over
+  // total listed problems on those weeks.
+  let listedTotal = 0;
+  let listedSolved = 0;
+  for (const week of visibleWeeks) {
+    const problems = Array.isArray(week.problems) ? week.problems : [];
+    listedTotal += problems.length;
+    const solvedSet = solvedSlugsInWeek(week, { solves });
+    listedSolved += problems.filter((p) => solvedSet.has(p.slug)).length;
+  }
+  const overallRatio = listedTotal === 0 ? 1 : listedSolved / listedTotal;
+
+  // Current week: same calc, just for the current week.
+  const currentWeek = visibleWeeks.find(
+    (w) => classifyWeek(w, now) === "current"
+  );
+  let currentSolved = 0;
+  let currentTotal = 0;
+  if (currentWeek) {
+    const problems = Array.isArray(currentWeek.problems) ? currentWeek.problems : [];
+    currentTotal = problems.length;
+    const solvedSet = solvedSlugsInWeek(currentWeek, { solves });
+    currentSolved = problems.filter((p) => solvedSet.has(p.slug)).length;
+  }
+  const currentRatio = currentTotal === 0 ? 1 : currentSolved / currentTotal;
+
+  // Risk flags — surfaced as pills next to the name.
+  const flags = [];
+  if (daysSinceActive === Infinity) flags.push("No activity yet");
+  else if (daysSinceActive >= INACTIVE_DAYS_THRESHOLD) {
+    flags.push(`Inactive ${Math.floor(daysSinceActive)}d`);
+  }
+  if (currentTotal > 0 && currentRatio < CURRENT_WEEK_LOW_THRESHOLD) {
+    flags.push(`Behind this week (${currentSolved}/${currentTotal})`);
+  }
+  if (listedTotal > 0 && overallRatio < OVERALL_LOW_THRESHOLD) {
+    flags.push(`Overall ${Math.round(overallRatio * 100)}%`);
+  }
+  // Check for a stale-pending signoff request.
+  const pendingSignoff = Object.values(weekProgressByNum).find(
+    (p) => p?.type === "topicExam" && p?.status === "requested"
+  );
+  if (pendingSignoff?.requestedAt) {
+    const waitingDays = (now - pendingSignoff.requestedAt) / ONE_DAY_MS;
+    if (waitingDays >= 3) flags.push(`Signoff pending ${Math.floor(waitingDays)}d`);
+  }
+
+  // Composite risk score for sorting. Higher = worse.
+  const risk =
+    (daysSinceActive === Infinity ? 30 : Math.min(daysSinceActive, 30)) +
+    (1 - overallRatio) * 20 +
+    (1 - currentRatio) * 20;
+
+  return {
+    netID,
+    name: student?.name || netID,
+    daysSinceActive,
+    lastActive,
+    currentSolved,
+    currentTotal,
+    currentRatio,
+    listedSolved,
+    listedTotal,
+    overallRatio,
+    flags,
+    risk,
+  };
+}
+
+async function fetchAllStudentsWithProgress() {
+  const [studentsList, weeks] = await Promise.all([
+    fetchStudentsWithIds(),
+    getWeeks(),
+  ]);
+
+  const perStudent = await Promise.all(
+    studentsList.map(async ({ netID, data }) => {
+      const progressDocs = await fetchCollection(
+        `students/${netID}/weekProgress`
+      );
+      const weekProgressByNum = {};
+      for (const p of progressDocs) {
+        if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
+      }
+      return { netID, student: data, weekProgressByNum };
+    })
+  );
+
+  return { rows: perStudent, weeks };
+}
+
+function renderStruggling({ rows, weeks }) {
+  const container = document.getElementById("struggling-list");
+  container.innerHTML = "";
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "ta-empty";
+    empty.textContent = "No students yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const metrics = rows.map((r) =>
+    computeMetrics({
+      student: r.student,
+      netID: r.netID,
+      weekProgressByNum: r.weekProgressByNum,
+      weeks,
+    })
+  );
+  metrics.sort((a, b) => b.risk - a.risk);
+
+  for (const m of metrics) {
+    container.appendChild(renderStrugglingRow(m));
+  }
+}
+
+function renderStrugglingRow(m) {
+  const article = document.createElement("article");
+  article.className = "struggling-row";
+  article.dataset.netid = m.netID;
+  article.addEventListener("click", () => selectStudent(m.netID));
+
+  const info = document.createElement("div");
+  info.className = "struggling-info";
+
+  const nameLine = document.createElement("div");
+  nameLine.className = "struggling-name";
+  nameLine.textContent = `${m.name} (${m.netID})`;
+  info.appendChild(nameLine);
+
+  if (m.flags.length > 0) {
+    const flagRow = document.createElement("div");
+    flagRow.className = "struggling-flags";
+    for (const f of m.flags) {
+      const pill = document.createElement("span");
+      pill.className = "flag-pill";
+      pill.textContent = f;
+      flagRow.appendChild(pill);
+    }
+    info.appendChild(flagRow);
+  } else {
+    const okRow = document.createElement("div");
+    okRow.className = "struggling-flags";
+    const ok = document.createElement("span");
+    ok.className = "flag-pill flag-ok";
+    ok.textContent = "On track";
+    okRow.appendChild(ok);
+    info.appendChild(okRow);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "struggling-meta";
+  const lastActiveStr =
+    m.daysSinceActive === Infinity
+      ? "no activity yet"
+      : `last active ${timeAgo(m.lastActive)}`;
+  const currentStr =
+    m.currentTotal === 0
+      ? "no current week"
+      : `this week ${m.currentSolved}/${m.currentTotal}`;
+  const overallStr = `overall ${m.listedSolved}/${m.listedTotal}`;
+  meta.textContent = `${lastActiveStr} · ${currentStr} · ${overallStr}`;
+  info.appendChild(meta);
+
+  article.appendChild(info);
+
+  const chevron = document.createElement("span");
+  chevron.className = "struggling-chevron";
+  chevron.textContent = "→";
+  article.appendChild(chevron);
+
+  return article;
+}
+
+async function loadAndRenderStruggling() {
+  const container = document.getElementById("struggling-list");
+  container.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
+  refreshWeeks();
+  try {
+    const data = await fetchAllStudentsWithProgress();
+    renderStruggling(data);
+  } catch (err) {
+    console.error("Failed to load struggling view:", err);
+    container.innerHTML = `<p class="ta-empty">Failed to load: ${err.message}</p>`;
+  }
+}
+
+// ---- Student detail view -----------------------------------------------
+
+function selectStudent(netID) {
+  selectedNetID = netID;
+  // Switch view.
+  const buttons = document.querySelectorAll(".ta-nav-btn");
+  const views = document.querySelectorAll(".ta-view");
+  buttons.forEach((b) => b.classList.toggle("active", b.dataset.view === "student"));
+  views.forEach((v) => (v.hidden = v.dataset.view !== "student"));
+  loadAndRenderStudentDetail();
+}
+
+async function loadAndRenderStudentDetail() {
+  const header = document.getElementById("student-detail-header");
+  const body = document.getElementById("student-detail-body");
+  header.innerHTML = "";
+  body.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
+
+  if (!selectedNetID) {
+    body.innerHTML = "";
+    header.innerHTML =
+      '<p class="ta-empty">Pick a student from ' +
+      '<a href="#" class="link-to-struggling">Struggling students</a> ' +
+      'to see their details.</p>';
+    return;
+  }
+
+  try {
+    const [student, weeks, progressDocs] = await Promise.all([
+      fetchDoc(`students/${selectedNetID}`),
+      getWeeks(),
+      fetchCollection(`students/${selectedNetID}/weekProgress`),
+    ]);
+    const weekProgressByNum = {};
+    for (const p of progressDocs) {
+      if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
+    }
+
+    renderStudentDetail({
+      student,
+      netID: selectedNetID,
+      weeks,
+      weekProgressByNum,
+    });
+  } catch (err) {
+    console.error("Failed to load student detail:", err);
+    body.innerHTML = `<p class="ta-empty">Failed to load: ${err.message}</p>`;
+  }
+}
+
+function renderStudentDetail({ student, netID, weeks, weekProgressByNum }) {
+  const header = document.getElementById("student-detail-header");
+  const body = document.getElementById("student-detail-body");
+  header.innerHTML = "";
+  body.innerHTML = "";
+
+  const metrics = computeMetrics({
+    student,
+    netID,
+    weekProgressByNum,
+    weeks,
+  });
+
+  // Header block
+  const h1 = document.createElement("h1");
+  h1.textContent = student?.name || netID;
+  header.appendChild(h1);
+
+  const sub = document.createElement("p");
+  sub.className = "student-detail-sub";
+  const parts = [`netID ${netID}`];
+  if (student?.leetcodeUsername) parts.push(`LeetCode @${student.leetcodeUsername}`);
+  if (student?.note) parts.push(student.note);
+  sub.textContent = parts.join(" · ");
+  header.appendChild(sub);
+
+  // Flag row
+  if (metrics.flags.length > 0) {
+    const flagRow = document.createElement("div");
+    flagRow.className = "struggling-flags";
+    for (const f of metrics.flags) {
+      const pill = document.createElement("span");
+      pill.className = "flag-pill";
+      pill.textContent = f;
+      flagRow.appendChild(pill);
+    }
+    header.appendChild(flagRow);
+  }
+
+  // Body: per-week breakdown
+  const now = Date.now();
+  const visible = [...weeks]
+    .filter((w) => w.startDate <= now)
+    .sort((a, b) => b.weekNum - a.weekNum);
+
+  const h2 = document.createElement("h2");
+  h2.textContent = "Weekly breakdown";
+  h2.className = "student-detail-section";
+  body.appendChild(h2);
+
+  if (visible.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "ta-empty";
+    empty.textContent = "No weeks yet.";
+    body.appendChild(empty);
+    return;
+  }
+
+  const table = document.createElement("div");
+  table.className = "weekly-breakdown";
+  for (const week of visible) {
+    table.appendChild(renderWeekBreakdownRow(week, student, weekProgressByNum[week.weekNum]));
+  }
+  body.appendChild(table);
+}
+
+function renderWeekBreakdownRow(week, student, progress) {
+  const row = document.createElement("div");
+  row.className = "weekly-row";
+
+  const label = document.createElement("div");
+  label.className = "weekly-label";
+  label.textContent = `Week ${week.weekNum}`;
+  row.appendChild(label);
+
+  const problems = Array.isArray(week.problems) ? week.problems : [];
+  const solves = student?.solvedProblems ?? {};
+  const solvedSet = solvedSlugsInWeek(week, { solves });
+  const solved = problems.filter((p) => solvedSet.has(p.slug)).length;
+
+  const recCell = document.createElement("div");
+  recCell.className = "weekly-cell";
+  recCell.textContent = `Recommended: ${solved}/${problems.length}`;
+  if (problems.length > 0 && solved === problems.length) recCell.classList.add("cell-done");
+  else if (problems.length > 0 && solved / problems.length < 0.5)
+    recCell.classList.add("cell-low");
+  row.appendChild(recCell);
+
+  const tcCell = document.createElement("div");
+  tcCell.className = "weekly-cell";
+  if (!week.thirdCard?.type) {
+    tcCell.textContent = "—";
+    tcCell.classList.add("cell-none");
+  } else {
+    const t = week.thirdCard.type;
+    const label = t === "topicExam" ? "Topic Exam"
+      : t === "onlineAssessment" ? "OA"
+      : t === "mockInterview" ? "Mock Interview"
+      : t;
+    let statusText = "not attempted";
+    if (progress) {
+      if (t === "topicExam") statusText = progress.status ?? "not attempted";
+      else if (t === "onlineAssessment") statusText = progress.finalStatus ?? "in progress";
+      else if (t === "mockInterview") statusText = progress.status ?? "not attempted";
+    }
+    tcCell.textContent = `${label}: ${statusText}`;
+    if (statusText === "passed" || statusText === "completed") tcCell.classList.add("cell-done");
+    else if (statusText === "failed") tcCell.classList.add("cell-low");
+  }
+  row.appendChild(tcCell);
+
+  return row;
+}
+
 // ---- Nav ---------------------------------------------------------------
 
 function wireNav() {
@@ -223,7 +602,22 @@ function wireNav() {
       if (btn.disabled) return;
       buttons.forEach((b) => b.classList.toggle("active", b === btn));
       views.forEach((v) => (v.hidden = v.dataset.view !== btn.dataset.view));
+      // Lazy-load views on first switch.
+      if (btn.dataset.view === "struggling") loadAndRenderStruggling();
+      if (btn.dataset.view === "student") loadAndRenderStudentDetail();
     });
+  });
+
+  // The empty-state link inside the detail view — clicking it should
+  // navigate to struggling.
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest(".link-to-struggling");
+    if (!link) return;
+    e.preventDefault();
+    const strugglingBtn = document.querySelector(
+      '.ta-nav-btn[data-view="struggling"]'
+    );
+    strugglingBtn?.click();
   });
 }
 
