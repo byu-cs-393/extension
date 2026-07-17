@@ -108,6 +108,14 @@ function unwrapFirestoreValue(valueObj) {
   if (type === "mapValue") {
     return parseFirestoreFields(value.fields);
   }
+  // Firestore's REST returns int64 as a JSON STRING to preserve
+  // precision (JS numbers can only hold integers up to 2^53).
+  // For our data, all timestamps + counts fit comfortably in a JS
+  // number, so convert here. Callers that need bigint should switch
+  // to reading the raw value.
+  if (type === "integerValue") {
+    return Number(value);
+  }
   return value;
 }
 

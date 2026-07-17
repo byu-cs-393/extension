@@ -183,6 +183,11 @@ function unwrapFirestoreValue(valueObj) {
   if (type === "mapValue") {
     return parseFirestoreFields(value.fields ?? {});
   }
+  // Firestore REST returns int64 as JSON string — see the note in
+  // firestore.js. Same conversion here.
+  if (type === "integerValue") {
+    return Number(value);
+  }
   return value;
 }
 
@@ -310,9 +315,10 @@ function computeMetrics({ student, netID, weekProgressByNum, weeks }) {
 }
 
 async function fetchAllStudentsWithProgress() {
-  const [studentsList, weeks] = await Promise.all([
+  const [studentsList, weeks, activityByStudent] = await Promise.all([
     fetchStudentsWithIds(),
     getWeeks(),
+    fetchActivityCountsByStudent(),
   ]);
 
   const perStudent = await Promise.all(
@@ -324,11 +330,35 @@ async function fetchAllStudentsWithProgress() {
       for (const p of progressDocs) {
         if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
       }
-      return { netID, student: data, weekProgressByNum };
+      return {
+        netID,
+        student: data,
+        weekProgressByNum,
+        activityCounts: activityByStudent[netID] ?? { opens: 0, passes: 0, fails: 0 },
+      };
     })
   );
 
   return { rows: perStudent, weeks };
+}
+
+// Fetches every event in `activity/` and groups counts by netID +
+// event type. Fine for a small course; we can switch to a filtered
+// query per student later if the collection grows past a few
+// thousand events.
+async function fetchActivityCountsByStudent() {
+  const events = await fetchCollection("activity");
+  const byStudent = {};
+  for (const e of events) {
+    const netID = e?.studentNetID;
+    if (!netID) continue;
+    const bucket = byStudent[netID] ?? { opens: 0, passes: 0, fails: 0 };
+    if (e.eventType === "open_problem") bucket.opens++;
+    else if (e.eventType === "submit_pass") bucket.passes++;
+    else if (e.eventType === "submit_fail") bucket.fails++;
+    byStudent[netID] = bucket;
+  }
+  return byStudent;
 }
 
 function renderStruggling({ rows, weeks }) {
@@ -342,14 +372,15 @@ function renderStruggling({ rows, weeks }) {
     return;
   }
 
-  const metrics = rows.map((r) =>
-    computeMetrics({
+  const metrics = rows.map((r) => ({
+    ...computeMetrics({
       student: r.student,
       netID: r.netID,
       weekProgressByNum: r.weekProgressByNum,
       weeks,
-    })
-  );
+    }),
+    activityCounts: r.activityCounts,
+  }));
   metrics.sort((a, b) => b.risk - a.risk);
 
   for (const m of metrics) {
@@ -402,7 +433,11 @@ function renderStrugglingRow(m) {
       ? "no current week"
       : `this week ${m.currentSolved}/${m.currentTotal}`;
   const overallStr = `overall ${m.listedSolved}/${m.listedTotal}`;
-  meta.textContent = `${lastActiveStr} · ${currentStr} · ${overallStr}`;
+  const opens = m.activityCounts?.opens ?? 0;
+  const passes = m.activityCounts?.passes ?? 0;
+  const fails = m.activityCounts?.fails ?? 0;
+  const visitsStr = `${opens} visits · ${passes} passes · ${fails} fails`;
+  meta.textContent = `${lastActiveStr} · ${currentStr} · ${overallStr} · ${visitsStr}`;
   info.appendChild(meta);
 
   article.appendChild(info);
@@ -456,10 +491,11 @@ async function loadAndRenderStudentDetail() {
   }
 
   try {
-    const [student, weeks, progressDocs] = await Promise.all([
+    const [student, weeks, progressDocs, activityByStudent] = await Promise.all([
       fetchDoc(`students/${selectedNetID}`),
       getWeeks(),
       fetchCollection(`students/${selectedNetID}/weekProgress`),
+      fetchActivityCountsByStudent(),
     ]);
     const weekProgressByNum = {};
     for (const p of progressDocs) {
@@ -471,6 +507,7 @@ async function loadAndRenderStudentDetail() {
       netID: selectedNetID,
       weeks,
       weekProgressByNum,
+      activityCounts: activityByStudent[selectedNetID] ?? { opens: 0, passes: 0, fails: 0 },
     });
   } catch (err) {
     console.error("Failed to load student detail:", err);
@@ -478,7 +515,7 @@ async function loadAndRenderStudentDetail() {
   }
 }
 
-function renderStudentDetail({ student, netID, weeks, weekProgressByNum }) {
+function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activityCounts }) {
   const header = document.getElementById("student-detail-header");
   const body = document.getElementById("student-detail-body");
   header.innerHTML = "";
@@ -503,6 +540,15 @@ function renderStudentDetail({ student, netID, weeks, weekProgressByNum }) {
   if (student?.note) parts.push(student.note);
   sub.textContent = parts.join(" · ");
   header.appendChild(sub);
+
+  // Activity summary line
+  const opens = activityCounts?.opens ?? 0;
+  const passes = activityCounts?.passes ?? 0;
+  const fails = activityCounts?.fails ?? 0;
+  const activityLine = document.createElement("p");
+  activityLine.className = "student-detail-sub";
+  activityLine.textContent = `${opens} problem visits · ${passes} accepted submissions · ${fails} failed submissions`;
+  header.appendChild(activityLine);
 
   // Flag row
   if (metrics.flags.length > 0) {

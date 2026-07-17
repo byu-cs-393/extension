@@ -1162,10 +1162,62 @@ exports.seedDummyStudents = onRequest(
         }
       }
 
+      // Activity events. Each solve gets a submit_pass event, plus
+      // some open_problem visits. Batched for efficiency. This gives
+      // the struggling-students / student-detail views something to
+      // count for "visits".
+      const batch = db.batch();
+      let activityCount = 0;
+      // One submit_pass per solve.
+      for (const [slug, ts] of Object.entries(solvedProblems)) {
+        const eventId = `dummy-${persona.netID}-pass-${slug}`;
+        batch.set(db.doc(`activity/${eventId}`), {
+          studentNetID: persona.netID,
+          eventType: "submit_pass",
+          source: "leetcode",
+          timestamp: ts,
+          problemSlug: slug,
+          verdict: "Accepted",
+        });
+        activityCount++;
+      }
+      // Random open_problem events. Roughly proportional to the
+      // persona's solveRate but never zero.
+      const opensPerSolve = 2 + rand() * 3; // 2-5x fanout
+      const targetOpens = Math.max(
+        3,
+        Math.floor(Object.keys(solvedProblems).length * opensPerSolve)
+      );
+      for (let i = 0; i < targetOpens; i++) {
+        let ts;
+        // 80% of opens land in existing week windows; 20% in the
+        // gaps between weeks (approximate but realistic).
+        if (weeks.length > 0 && rand() < 0.8) {
+          const w = weeks[Math.floor(rand() * weeks.length)];
+          ts = w.startDate + rand() * (w.endDate - w.startDate);
+        } else {
+          ts = now - rand() * 30 * ONE_DAY_MS;
+        }
+        // Respect the persona's staleness.
+        if (ts > staleCutoff) ts = staleCutoff - rand() * ONE_DAY_MS;
+        ts = Math.max(0, Math.floor(ts));
+        const eventId = `dummy-${persona.netID}-open-${i}`;
+        batch.set(db.doc(`activity/${eventId}`), {
+          studentNetID: persona.netID,
+          eventType: "open_problem",
+          source: "leetcode",
+          timestamp: ts,
+          problemSlug: `some-problem-${i}`,
+        });
+        activityCount++;
+      }
+      await batch.commit();
+
       summary.push({
         netID: persona.netID,
         name: persona.name,
         solves: Object.keys(solvedProblems).length,
+        activityEvents: activityCount,
         weekProgress: persona.signoff ? 1 : 0,
       });
     }
