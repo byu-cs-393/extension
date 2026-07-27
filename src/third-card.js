@@ -45,6 +45,7 @@ import {
   solvedInWindow,
   resetOa,
 } from "./oa-session.js";
+import { requestSignoff, submitSelfRating } from "./assignment-progress.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
 
@@ -79,26 +80,218 @@ export async function refreshProgress(netID) {
 
 // ---- Rendering: dispatcher ----------------------------------------------
 
-// Returns an HTMLElement for the third card, or null if the week has none.
-// `progress` is the per-student progress doc for this week, or null.
-// `weekStatus` is "current" | "past" | "future" — affects whether action
-// buttons render (past weeks are read-only for topic exam attempts that
-// were never requested; OA + mock interview remain late-completable).
-// `ctx` bundles per-render context (currently { weekNum, netID,
-// activeSession }). Only OA uses it for now.
-export function createThirdCardSection(thirdCard, progress, weekStatus, ctx = {}) {
-  if (!thirdCard || !thirdCard.type) return null;
-  switch (thirdCard.type) {
+// Returns an HTMLElement for a third card, or null if unrenderable.
+// Handles BOTH the new course.json item shape (types: "oa", "performance",
+// "peer-mock", "live-interview", "professional-mock", "final") AND the
+// legacy Firestore third-card shape (types: "topicExam",
+// "onlineAssessment", "mockInterview"), for back-compat during migration.
+//
+// `progress` is the per-student progress doc for this week (or null).
+// `weekStatus` is "current" | "past" | "future".
+// `ctx` bundles per-render context: { weekNum, netID, activeSession,
+//    solves, oaShapes: {topic → runtime OA} }. oaShapes is preloaded
+//    by dashboard.js so the OA renderer stays synchronous.
+export function createThirdCardSection(item, progress, weekStatus, ctx = {}) {
+  if (!item || !item.type) return null;
+  switch (item.type) {
+    // ---- course.json types (new) ----
+    case "oa":
+      return renderOaFromCourseItem(item, progress, weekStatus, ctx);
+    case "performance":
+      return renderCoursePerformanceExam(item, progress, weekStatus, ctx);
+    case "peer-mock":
+      return renderCoursePeerMock(item, progress, weekStatus, ctx);
+    case "live-interview":
+      return renderCourseLiveInterview(item, progress, weekStatus, ctx);
+    case "professional-mock":
+      return renderCourseProfessionalMock(item, progress, weekStatus, ctx);
+    case "final":
+      return renderCourseFinal(item, progress, weekStatus, ctx);
+    // ---- legacy Firestore-model types ----
     case "topicExam":
-      return renderTopicExam(thirdCard, progress, weekStatus, ctx);
+      return renderTopicExam(item, progress, weekStatus, ctx);
     case "onlineAssessment":
-      return renderOnlineAssessment(thirdCard, progress, weekStatus, ctx);
+      return renderOnlineAssessment(item, progress, weekStatus, ctx);
     case "mockInterview":
-      return renderMockInterview(thirdCard, progress, weekStatus);
+      return renderMockInterview(item, progress, weekStatus);
     default:
-      console.warn("[CS 393 Buddy] unknown thirdCard type:", thirdCard.type);
+      console.warn("[CS 393 Buddy] unknown card type:", item.type);
       return null;
   }
+}
+
+// Bridge: takes a course.json performance item of type "oa" and delegates
+// to the existing OA renderer using the pre-translated runtime shape
+// (loaded by the dashboard into ctx.oaShapes at bootstrap).
+function renderOaFromCourseItem(item, progress, weekStatus, ctx) {
+  const runtime = ctx?.oaShapes?.[item.topic];
+  if (!runtime) {
+    const article = makeCard();
+    addTitle(article, item.title ?? "Online Assessment");
+    addStatusLine(article, "Loading…");
+    return article;
+  }
+  return renderOnlineAssessment(runtime, progress, weekStatus, ctx);
+}
+
+// ---- Placeholder renderers for new course.json types -------------------
+//
+// These are display-only for now. Step 5 will add full progress tracking
+// (per-assignment progress docs, TA signoff flows for perf/live, partner
+// pairing for peer-mock, etc). Kept minimal on purpose so we can see the
+// dashboard layout at multi-card granularity before we commit to signoff
+// data shapes.
+
+function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
+  const article = makeCard();
+  addTitle(article, item.title ?? "Performance Exam");
+  addDetail(article, "Practice ahead of time, then perform live in 15 min for a TA.");
+
+  const ap = ctx?.assignmentProgress?.[item.assignmentId] ?? null;
+  const status = ap?.status ?? "available";
+
+  if (status === "passed") {
+    addStatusLine(article, "✓ Passed", "complete");
+    // Rare — but if the student wants to retake, allow it (matches the
+    // "you can always retry to improve" spirit of the topic exams).
+    appendRequestButton(article, item, ap, ctx, "Request re-signoff");
+    return article;
+  }
+  if (status === "requested") {
+    addStatusLine(article, "⏳ Signoff requested");
+    return article;
+  }
+  if (weekStatus === "past" && status === "available") {
+    addStatusLine(article, "Not attempted");
+    return article;
+  }
+  const label = status === "failed" ? "Request re-signoff" : "Request signoff";
+  if (status === "failed") addStatusLine(article, "✗ Failed", "incomplete");
+  appendRequestButton(article, item, ap, ctx, label);
+  return article;
+}
+
+// Shared helper: renders the "Request signoff" button. Wired to
+// assignment-progress.js's requestSignoff. Records weekNum so the TA's
+// signoff queue can surface it under the right week header.
+function appendRequestButton(article, item, existingProgress, ctx, label) {
+  addPrimaryButton(article, label, async () => {
+    if (!ctx?.netID || !item?.assignmentId) {
+      stubAction("Signoff");
+      return;
+    }
+    try {
+      await requestSignoff({
+        netID: ctx.netID,
+        assignmentId: item.assignmentId,
+        type: item.type,
+        weekNum: ctx.weekNum,
+      });
+    } catch (err) {
+      console.error("[CS 393 Buddy] Failed to request signoff:", err);
+      alert("Couldn't submit your signoff request. Try again in a moment.");
+    }
+  });
+}
+
+function renderCoursePeerMock(item, _progress, _weekStatus) {
+  const article = makeCard();
+  addTitle(article, item.title ?? "Peer Mock Interview");
+  addDetail(article, "Pair with a classmate this week.");
+  addStatusLine(article, "Pairing flow coming soon");
+  return article;
+}
+
+function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
+  const article = makeCard();
+  const titleLabel = item.index ? `Live Interview ${item.index}` : "Live Interview";
+  addTitle(article, titleLabel);
+  addDetail(article, "Schedule with a TA or the instructor. Self-rate 1/2/3 after.");
+
+  const ap = ctx?.assignmentProgress?.[item.assignmentId] ?? null;
+  const status = ap?.status ?? "available";
+
+  if (status === "passed") {
+    // TA's grader rating shows first (if set), student self-rating below.
+    if (Number.isInteger(ap?.graderRating)) {
+      addStatusLine(article, `✓ Passed · TA rating ${ap.graderRating}/3`, "complete");
+    } else {
+      addStatusLine(article, "✓ Passed", "complete");
+    }
+    if (Number.isInteger(ap?.selfRating)) {
+      addDetail(article, `Your self-rating: ${ap.selfRating}/3`);
+    } else {
+      // Prompt the student to self-rate — required to fully complete
+      // the live interview per the professor's rubric.
+      appendSelfRatingRow(article, item, ctx);
+    }
+    // Live interviews are always retakeable — the professor explicitly
+    // wants students to try before they feel ready.
+    appendRequestButton(article, item, ap, ctx, "Request another");
+    return article;
+  }
+  if (status === "requested") {
+    addStatusLine(article, "⏳ Signoff requested");
+    return article;
+  }
+  if (weekStatus === "past" && status === "available") {
+    addStatusLine(article, "Not attempted");
+    return article;
+  }
+  const label = status === "failed" ? "Request re-signoff" : "Request signoff";
+  if (status === "failed") addStatusLine(article, "✗ Failed", "incomplete");
+  appendRequestButton(article, item, ap, ctx, label);
+  return article;
+}
+
+// Inline 1 / 2 / 3 button row for the student's self-rating on a
+// passed live interview. Writes to assignmentProgress via
+// submitSelfRating; the storage listener fires re-render immediately.
+function appendSelfRatingRow(article, item, ctx) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "card-actions self-rating-row";
+
+  const label = document.createElement("span");
+  label.className = "card-detail self-rating-label";
+  label.textContent = "Self-rate:";
+  wrapper.appendChild(label);
+
+  for (const n of [1, 2, 3]) {
+    const btn = document.createElement("button");
+    btn.className = "btn-primary self-rating-btn";
+    btn.textContent = String(n);
+    btn.addEventListener("click", async () => {
+      if (!ctx?.netID || !item?.assignmentId) return;
+      try {
+        await submitSelfRating({
+          netID: ctx.netID,
+          assignmentId: item.assignmentId,
+          selfRating: n,
+        });
+      } catch (err) {
+        console.error("[CS 393 Buddy] self-rate failed:", err);
+        alert("Couldn't save your self-rating. Try again in a moment.");
+      }
+    });
+    wrapper.appendChild(btn);
+  }
+  article.appendChild(wrapper);
+}
+
+function renderCourseProfessionalMock(item, _progress, _weekStatus) {
+  const article = makeCard();
+  addTitle(article, item.title ?? "Professional Mock Interview");
+  addDetail(article, "One-on-one with someone working in industry (takes ~a month to line up).");
+  addStatusLine(article, "Submission flow coming soon");
+  return article;
+}
+
+function renderCourseFinal(item, _progress, _weekStatus) {
+  const article = makeCard();
+  const label = item.phase === "concludes" ? "Final Exam (concludes)" : "Final Exam";
+  addTitle(article, label);
+  addDetail(article, "5.5 hrs across three sittings. Must pass to pass the course.");
+  return article;
 }
 
 function stubAction(label) {

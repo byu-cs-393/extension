@@ -32,9 +32,20 @@
       "run_at": "document_idle"
     },
     {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["keystroke-tracker.js"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": ["https://byu.instructure.com/*"],
       "js": ["canvas-auth.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["keystroke-injector.js"],
+      "matches": ["https://leetcode.com/*"]
     }
   ]
 }

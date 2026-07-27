@@ -156,6 +156,62 @@ service cloud.firestore {
           && string(int(data.weekNum)) == weekNum;
     }
 
+    // ---- students/{netID}/assignmentProgress/{assignmentId} ------------
+    // Per-assignment progress, keyed by the stable ID from
+    // data/course.json (e.g. "perf-graphs", "live-1", "peer-mock-w5").
+    // Superset replacement for the older weekProgress model — one doc
+    // per assignment instead of one doc per week — chosen so multi-card
+    // weeks each carry their own state. OA still lives on weekProgress
+    // until Phase 3 (grade-push migration).
+    //
+    // Read: owner OR TA (needed for the signoff queue + student detail).
+    // Write: owner (student-side signoff request + self-rating) OR TA
+    //   (TA-side signoff decisions + grader ratings). Same permission
+    //   model as weekProgress; we validate shape lightly here and rely
+    //   on client code to write consistent documents.
+    match /students/{netID}/assignmentProgress/{assignmentId} {
+      allow read: if request.auth != null
+                    && (request.auth.uid == netID
+                        || request.auth.token.role == 'ta');
+      allow create, update: if request.auth != null
+                             && (request.auth.uid == netID
+                                 || request.auth.token.role == 'ta')
+                             && isValidAssignmentProgress(request.resource.data, assignmentId);
+      allow delete: if request.auth != null && request.auth.uid == netID;
+    }
+
+    function isValidAssignmentProgress(data, assignmentId) {
+      return 'assignmentId' in data
+          && data.assignmentId == assignmentId
+          && 'type' in data
+          && data.type in ['performance', 'live-interview', 'peer-mock', 'professional-mock'];
+    }
+
+    // ---- students/{netID}/keystrokeSessions/{sessionId} ----------------
+    // One doc per problem-page visit; chunks/ subcollection holds the
+    // captured Monaco deltas + paste/copy/visibility events.
+    //
+    // Owner writes both metadata and chunks. TAs get read access for
+    // future playback / paste-detection views. No delete for now — the
+    // pilot data is small and worth keeping for post-hoc analysis.
+    match /students/{netID}/keystrokeSessions/{sessionId} {
+      allow read: if request.auth != null
+                    && (request.auth.uid == netID
+                        || request.auth.token.role == 'ta');
+      allow create, update: if request.auth != null
+                             && request.auth.uid == netID;
+      allow delete: if false;
+
+      match /chunks/{chunkIndex} {
+        allow read: if request.auth != null
+                      && (request.auth.uid == netID
+                          || request.auth.token.role == 'ta');
+        allow create, update: if request.auth != null
+                               && request.auth.uid == netID;
+        allow delete: if false;
+      }
+    }
+
     // ---- gradeSyncLog/{runId} ------------------------------------------
     // Write-only from the Cloud Function via Admin SDK (rules bypassed);
     // read access from the instructor allowlist. Keep the allowlist in

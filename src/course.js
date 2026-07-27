@@ -3,28 +3,38 @@
 // weeks render as read-only faded cards with a "Released MMM D"
 // badge; students can see what's coming but can't start early.
 //
-// Reuses dashboard.css for styling. Interactive OA/topic-exam cards
-// only render for current/past weeks; future weeks show a placeholder.
+// Reuses dashboard.css for styling. Interactive OA / performance-exam
+// cards only render for current/past weeks; future weeks show a
+// placeholder that hints at the coming assignments.
 import { fetchStudent } from "./firestore.js";
 import {
-  getWeeks,
-  refreshWeeks,
+  getAllScheduleCards,
   classifyWeek,
   solvedSlugsInWeek,
-} from "./recommended.js";
+  flattenPlacementsToProblems,
+  getOaRuntimeShape,
+  getTopics,
+} from "./course-data.js";
 import {
   createThirdCardSection,
   getCachedProgress,
   refreshProgress,
 } from "./third-card.js";
+import {
+  getCachedAssignmentProgress,
+  refreshAssignmentProgress,
+  ASSIGNMENT_PROGRESS_CACHE_KEY,
+} from "./assignment-progress.js";
 import { getActive, OA_SESSION_KEY } from "./oa-session.js";
 
 // Module-scoped state — render() reads from these.
-let currentWeeks = [];
+let currentCards = [];
 let currentSolves = null;
 let currentProgress = {};
 let currentActiveOa = null;
 let currentNetID = null;
+let currentOaShapes = {};
+let currentAssignmentProgress = {};
 
 const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
@@ -33,44 +43,33 @@ async function getNetID() {
   return netID || null;
 }
 
-function formatDateRange(startMs, endMs) {
-  const start = new Date(startMs);
-  const end = new Date(endMs - 1); // inclusive Sunday
-  const startStr = SHORT_DATE.format(start);
-  if (start.getMonth() === end.getMonth()) {
-    return `${startStr} – ${end.getDate()}`;
-  }
-  return `${startStr} – ${SHORT_DATE.format(end)}`;
-}
-
 // ---- Rendering ---------------------------------------------------------
 
 function renderWeeks() {
   const container = document.getElementById("weeks-container");
   container.innerHTML = "";
 
-  if (currentWeeks.length === 0) {
+  if (currentCards.length === 0) {
     const empty = document.createElement("p");
     empty.className = "weeks-empty";
-    empty.textContent = "No weeks yet. Visit leetcode.com to seed the schedule.";
+    empty.textContent = "No weeks in the course.";
     container.appendChild(empty);
     return;
   }
 
-  // Full course view: sort newest-first (matches dashboard) so students
-  // see the current week near the top.
+  // Newest-first so the current week sits near the top (matches dashboard).
   const now = Date.now();
-  const sorted = [...currentWeeks].sort((a, b) => b.weekNum - a.weekNum);
-  for (const week of sorted) {
-    container.appendChild(createWeekSection(week, classifyWeek(week, now)));
+  const sorted = [...currentCards].sort((a, b) => b.week - a.week);
+  for (const cards of sorted) {
+    container.appendChild(createWeekSection(cards, classifyWeek(cards, now)));
   }
 }
 
-function createWeekSection(week, status) {
+function createWeekSection(cards, status) {
   const section = document.createElement("section");
   section.className = "week";
   if (status === "future") section.classList.add("future");
-  section.dataset.weekNum = String(week.weekNum);
+  section.dataset.weekNum = String(cards.week);
 
   // Header
   const header = document.createElement("div");
@@ -78,51 +77,61 @@ function createWeekSection(week, status) {
 
   const title = document.createElement("h2");
   title.className = "week-title";
-  title.append(`Week ${week.weekNum}`);
+  title.append(`Week ${cards.week}`);
+  if (cards.title) {
+    const subtitle = document.createElement("span");
+    subtitle.className = "week-subtitle";
+    subtitle.textContent = ` — ${cards.title}`;
+    title.appendChild(subtitle);
+  }
   if (status === "current") {
     const badge = document.createElement("span");
     badge.className = "week-badge";
     badge.textContent = "Current";
     title.appendChild(badge);
-  } else if (status === "future") {
+  } else if (status === "future" && cards.startMs != null) {
     const badge = document.createElement("span");
     badge.className = "week-badge locked";
-    badge.textContent = `🔒 Released ${SHORT_DATE.format(new Date(week.startDate))}`;
+    badge.textContent = `🔒 Released ${SHORT_DATE.format(new Date(cards.startMs))}`;
     title.appendChild(badge);
   }
 
   const dates = document.createElement("div");
   dates.className = "week-dates";
-  dates.textContent = formatDateRange(week.startDate, week.endDate);
+  dates.textContent = cards.dates ?? "";
 
   header.append(title, dates);
   section.appendChild(header);
 
   if (status === "future") {
     // Future weeks: read-only preview. No problem list (no peeking),
-    // no interactive third card. Just a placeholder card that hints
-    // at what's coming.
-    section.appendChild(createFuturePlaceholder(week));
+    // no interactive third cards. Just a placeholder card + a summary
+    // of the assessments coming.
+    section.appendChild(createFuturePlaceholder(cards));
     return section;
   }
 
-  section.appendChild(createRecommendedCard(week, status));
-  const thirdCardEl = createThirdCardSection(
-    week.thirdCard,
-    currentProgress?.[week.weekNum] ?? null,
-    status,
-    {
-      weekNum: week.weekNum,
-      netID: currentNetID,
-      activeSession: currentActiveOa,
-      solves: currentSolves?.solves ?? {},
-    }
-  );
-  if (thirdCardEl) section.appendChild(thirdCardEl);
+  section.appendChild(createRecommendedCard(cards, status));
+  for (const item of cards.performanceItems ?? []) {
+    const cardEl = createThirdCardSection(
+      item,
+      currentProgress?.[cards.week] ?? null,
+      status,
+      {
+        weekNum: cards.week,
+        netID: currentNetID,
+        activeSession: currentActiveOa,
+        solves: currentSolves?.solves ?? {},
+        oaShapes: currentOaShapes,
+        assignmentProgress: currentAssignmentProgress,
+      },
+    );
+    if (cardEl) section.appendChild(cardEl);
+  }
   return section;
 }
 
-function createFuturePlaceholder(week) {
+function createFuturePlaceholder(cards) {
   const article = document.createElement("article");
   article.className = "card future-placeholder";
 
@@ -131,41 +140,52 @@ function createFuturePlaceholder(week) {
   title.textContent = "Recommended problems";
   article.appendChild(title);
 
-  const total = week.problems?.length ?? 0;
+  const total = flattenPlacementsToProblems(cards.placements).length;
+  const startText = cards.startMs != null
+    ? SHORT_DATE.format(new Date(cards.startMs))
+    : "later";
   const meta = document.createElement("div");
   meta.className = "card-meta";
   meta.textContent =
     total > 0
-      ? `${total} problems will unlock ${SHORT_DATE.format(new Date(week.startDate))}.`
-      : `Will unlock ${SHORT_DATE.format(new Date(week.startDate))}.`;
+      ? `${total} problems will unlock ${startText}.`
+      : `Will unlock ${startText}.`;
   article.appendChild(meta);
 
-  if (week.thirdCard?.type) {
-    const kind = document.createElement("div");
-    kind.className = "card-detail";
-    kind.textContent = thirdCardLabel(week.thirdCard);
-    article.appendChild(kind);
+  for (const item of cards.performanceItems ?? []) {
+    const line = document.createElement("div");
+    line.className = "card-detail";
+    line.textContent = "+ " + performanceItemLabel(item);
+    article.appendChild(line);
   }
   return article;
 }
 
-function thirdCardLabel(thirdCard) {
-  switch (thirdCard.type) {
-    case "topicExam":
-      return `+ Topic Exam · ${thirdCard.topic ?? ""}`.trim();
-    case "onlineAssessment":
-      return `+ Online Assessment · ${thirdCard.topic ?? ""}`.trim();
-    case "mockInterview":
-      return "+ Mock Interview";
+function performanceItemLabel(item) {
+  if (item.title) return item.title;
+  switch (item.type) {
+    case "oa":
+      return `Online Assessment · ${item.topic ?? ""}`.trim();
+    case "performance":
+      return `Performance Exam · ${item.topic ?? ""}`.trim();
+    case "peer-mock":
+      return "Peer Mock Interview";
+    case "live-interview":
+      return item.index ? `Live Interview ${item.index}` : "Live Interview";
+    case "professional-mock":
+      return "Professional Mock Interview";
+    case "final":
+      return item.phase ? `Final Exam (${item.phase})` : "Final Exam";
     default:
-      return "";
+      return item.type ?? "";
   }
 }
 
-function createRecommendedCard(week, status) {
-  const solvedSet = solvedSlugsInWeek(week, currentSolves);
-  const total = week.problems.length;
-  const solved = week.problems.filter((p) => solvedSet.has(p.slug)).length;
+function createRecommendedCard(cards, status) {
+  const problems = flattenPlacementsToProblems(cards.placements);
+  const solvedSet = solvedSlugsInWeek(cards, currentSolves);
+  const total = problems.length;
+  const solved = problems.filter((p) => solvedSet.has(p.slug)).length;
   const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
   const isComplete = total > 0 && solved === total;
 
@@ -223,7 +243,7 @@ function createRecommendedCard(week, status) {
     details.appendChild(summary);
     const list = document.createElement("ul");
     list.className = "card-list problem-list";
-    for (const p of week.problems) {
+    for (const p of problems) {
       list.appendChild(createProblemItem(p, solvedSet.has(p.slug)));
     }
     details.appendChild(list);
@@ -246,11 +266,11 @@ function createProblemItem(p, isSolved) {
   link.rel = "noopener noreferrer";
   link.textContent = p.title;
   li.append(mark, link);
-  if (p.difficulty) {
-    const diff = document.createElement("span");
-    diff.className = `problem-diff diff-${p.difficulty.toLowerCase()}`;
-    diff.textContent = p.difficulty;
-    li.appendChild(diff);
+  if (p.tag) {
+    const tag = document.createElement("span");
+    tag.className = "problem-tag";
+    tag.textContent = p.tag;
+    li.appendChild(tag);
   }
   return li;
 }
@@ -259,16 +279,28 @@ function createProblemItem(p, isSolved) {
 
 async function init(netID) {
   currentNetID = netID;
-  currentWeeks = await getWeeks();
-  const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
+  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa] =
+    await Promise.all([
+      getAllScheduleCards(),
+      getTopics(),
+      chrome.storage.local.get("solvedProblems"),
+      getCachedProgress(),
+      getCachedAssignmentProgress(),
+      getActive(),
+    ]);
+  currentCards = cards;
   currentSolves = solvedProblems ?? null;
-  currentProgress = await getCachedProgress();
-  currentActiveOa = await getActive();
+  currentProgress = progress;
+  currentAssignmentProgress = assignmentProgress;
+  currentActiveOa = activeOa;
+  const oaEntries = await Promise.all(
+    topics.map(async (t) => [t.id, await getOaRuntimeShape(t.id)]),
+  );
+  currentOaShapes = Object.fromEntries(oaEntries);
   renderWeeks();
 
-  // Background refresh
-  refreshWeeks();
   refreshProgress(netID);
+  refreshAssignmentProgress(netID);
   try {
     const student = await fetchStudent(netID);
     const raw = student?.solvedProblems;
@@ -288,15 +320,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentSolves = changes.solvedProblems.newValue ?? null;
     needsRender = true;
   }
-  if (changes.weeksCatalog) {
-    const next = changes.weeksCatalog.newValue?.weeks;
-    if (Array.isArray(next)) {
-      currentWeeks = next;
-      needsRender = true;
-    }
-  }
   if (changes.weekProgressBundle) {
     currentProgress = changes.weekProgressBundle.newValue?.progress ?? {};
+    needsRender = true;
+  }
+  if (changes[ASSIGNMENT_PROGRESS_CACHE_KEY]) {
+    currentAssignmentProgress =
+      changes[ASSIGNMENT_PROGRESS_CACHE_KEY].newValue?.progress ?? {};
     needsRender = true;
   }
   if (changes[OA_SESSION_KEY]) {

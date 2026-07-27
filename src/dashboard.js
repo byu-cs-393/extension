@@ -1,16 +1,24 @@
 import { fetchStudent } from "./firestore.js";
 import { getRole } from "./auth.js";
 import {
-  getWeeks,
-  refreshWeeks,
+  getVisibleWeeks,
+  getCardsForWeek,
   classifyWeek,
   solvedSlugsInWeek,
-} from "./recommended.js";
+  flattenPlacementsToProblems,
+  getOaRuntimeShape,
+  getTopics,
+} from "./course-data.js";
 import {
   createThirdCardSection,
   getCachedProgress,
   refreshProgress,
 } from "./third-card.js";
+import {
+  getCachedAssignmentProgress,
+  refreshAssignmentProgress,
+  ASSIGNMENT_PROGRESS_CACHE_KEY,
+} from "./assignment-progress.js";
 import {
   getActive,
   getRemainingMs,
@@ -23,12 +31,17 @@ import {
 
 // Module-scoped state — render() reads from these. Two paths update
 // them: chrome.storage.onChanged (live), or the bootstrap (initial).
-let currentWeeks = [];
+let currentCards = []; // cards blobs from course-data.js
 let currentSolves = null;
-let currentProgress = {}; // { [weekNum]: progressDoc }
+let currentProgress = {}; // { [weekNum]: progressDoc } — Firestore weekProgress
 let currentActiveOa = null; // active OA session, or null
 let currentNetID = null;
 let timerInterval = null;
+// Preloaded runtime-shape OAs keyed by topic id. Populated once in
+// initWeeks so the sync third-card dispatcher can render OA cards
+// without an async fetch mid-render.
+let currentOaShapes = {};
+let currentAssignmentProgress = {}; // { [assignmentId]: doc }
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -54,7 +67,6 @@ async function loadAndRender(netID) {
 // ---- Week rendering ----------------------------------------------------
 
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
 function formatRelativeTime(timestamp) {
   if (!timestamp) return "";
@@ -74,43 +86,28 @@ function formatRelativeTime(timestamp) {
   return RELATIVE_TIME_FORMATTER.format(Math.round(seconds / 604800), "week");
 }
 
-function formatDateRange(startMs, endMs) {
-  const start = new Date(startMs);
-  const end = new Date(endMs - 1); // inclusive Sunday
-  const startStr = SHORT_DATE.format(start);
-  if (start.getMonth() === end.getMonth()) {
-    return `${startStr} – ${end.getDate()}`;
-  }
-  return `${startStr} – ${SHORT_DATE.format(end)}`;
-}
-
 function renderWeeks() {
   const container = document.getElementById("weeks-container");
   container.innerHTML = "";
 
-  // Visible weeks: current + past. Future weeks hidden until they start.
-  const now = Date.now();
-  const visible = currentWeeks
-    .filter((w) => w.startDate <= now)
-    .sort((a, b) => b.weekNum - a.weekNum); // newest first
-
-  if (visible.length === 0) {
+  if (currentCards.length === 0) {
     const empty = document.createElement("p");
     empty.className = "weeks-empty";
-    empty.textContent = "No weeks yet. Visit leetcode.com to seed the schedule.";
+    empty.textContent = "No weeks in view yet — the semester hasn't started.";
     container.appendChild(empty);
     return;
   }
 
-  for (const week of visible) {
-    container.appendChild(createWeekSection(week, classifyWeek(week, now)));
+  const now = Date.now();
+  for (const cards of currentCards) {
+    container.appendChild(createWeekSection(cards, classifyWeek(cards, now)));
   }
 }
 
-function createWeekSection(week, status) {
+function createWeekSection(cards, status) {
   const section = document.createElement("section");
   section.className = "week";
-  section.dataset.weekNum = String(week.weekNum);
+  section.dataset.weekNum = String(cards.week);
 
   // Header
   const header = document.createElement("div");
@@ -118,7 +115,13 @@ function createWeekSection(week, status) {
 
   const title = document.createElement("h2");
   title.className = "week-title";
-  title.append(`Week ${week.weekNum}`);
+  title.append(`Week ${cards.week}`);
+  if (cards.title) {
+    const subtitle = document.createElement("span");
+    subtitle.className = "week-subtitle";
+    subtitle.textContent = ` — ${cards.title}`;
+    title.appendChild(subtitle);
+  }
   if (status === "current") {
     const badge = document.createElement("span");
     badge.className = "week-badge";
@@ -128,31 +131,37 @@ function createWeekSection(week, status) {
 
   const dates = document.createElement("div");
   dates.className = "week-dates";
-  dates.textContent = formatDateRange(week.startDate, week.endDate);
+  dates.textContent = cards.dates ?? "";
 
   header.append(title, dates);
   section.appendChild(header);
 
-  section.appendChild(createRecommendedCard(week, status));
-  const thirdCardEl = createThirdCardSection(
-    week.thirdCard,
-    currentProgress?.[week.weekNum] ?? null,
-    status,
-    {
-      weekNum: week.weekNum,
-      netID: currentNetID,
-      activeSession: currentActiveOa,
-      solves: currentSolves?.solves ?? {},
-    }
-  );
-  if (thirdCardEl) section.appendChild(thirdCardEl);
+  section.appendChild(createRecommendedCard(cards, status));
+
+  for (const item of cards.performanceItems ?? []) {
+    const cardEl = createThirdCardSection(
+      item,
+      currentProgress?.[cards.week] ?? null,
+      status,
+      {
+        weekNum: cards.week,
+        netID: currentNetID,
+        activeSession: currentActiveOa,
+        solves: currentSolves?.solves ?? {},
+        oaShapes: currentOaShapes,
+        assignmentProgress: currentAssignmentProgress,
+      },
+    );
+    if (cardEl) section.appendChild(cardEl);
+  }
   return section;
 }
 
-function createRecommendedCard(week, status) {
-  const solvedSet = solvedSlugsInWeek(week, currentSolves);
-  const total = week.problems.length;
-  const solved = week.problems.filter((p) => solvedSet.has(p.slug)).length;
+function createRecommendedCard(cards, status) {
+  const problems = flattenPlacementsToProblems(cards.placements);
+  const solvedSet = solvedSlugsInWeek(cards, currentSolves);
+  const total = problems.length;
+  const solved = problems.filter((p) => solvedSet.has(p.slug)).length;
   const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
   const isComplete = total > 0 && solved === total;
 
@@ -184,7 +193,6 @@ function createRecommendedCard(week, status) {
   } else {
     fill.className = "progress-fill";
   }
-
   bar.appendChild(fill);
 
   const text = document.createElement("div");
@@ -219,7 +227,7 @@ function createRecommendedCard(week, status) {
 
     const list = document.createElement("ul");
     list.className = "card-list problem-list";
-    for (const p of week.problems) {
+    for (const p of problems) {
       list.appendChild(createProblemItem(p, solvedSet.has(p.slug)));
     }
     details.appendChild(list);
@@ -234,8 +242,7 @@ function createRecommendedCard(week, status) {
       ? `Synced ${formatRelativeTime(currentSolves.syncedAt)}`
       : "Solve a problem on LeetCode to register progress.";
   } else if (status === "past" && !isComplete) {
-    const ended = SHORT_DATE.format(new Date(week.endDate - 1));
-    meta.textContent = `Week ended ${ended} — no more credit.`;
+    meta.textContent = `Week ended — no more credit.`;
   }
   article.appendChild(meta);
 
@@ -259,11 +266,11 @@ function createProblemItem(p, isSolved) {
 
   li.append(mark, link);
 
-  if (p.difficulty) {
-    const diff = document.createElement("span");
-    diff.className = `problem-diff diff-${p.difficulty.toLowerCase()}`;
-    diff.textContent = p.difficulty;
-    li.appendChild(diff);
+  if (p.tag) {
+    const tag = document.createElement("span");
+    tag.className = `problem-tag`;
+    tag.textContent = p.tag;
+    li.appendChild(tag);
   }
   return li;
 }
@@ -272,20 +279,33 @@ function createProblemItem(p, isSolved) {
 
 async function initWeeks(netID) {
   currentNetID = netID;
-  currentWeeks = await getWeeks();
-  const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
+  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa] =
+    await Promise.all([
+      getVisibleWeeks(),
+      getTopics(),
+      chrome.storage.local.get("solvedProblems"),
+      getCachedProgress(),
+      getCachedAssignmentProgress(),
+      getActive(),
+    ]);
+  currentCards = cards;
   currentSolves = solvedProblems ?? null;
-  currentProgress = await getCachedProgress();
-  currentActiveOa = await getActive();
+  currentProgress = progress;
+  currentAssignmentProgress = assignmentProgress;
+  currentActiveOa = activeOa;
+  // Preload runtime-shape OAs for every topic so the sync third-card
+  // dispatcher can render OA cards without an async fetch mid-render.
+  const oaEntries = await Promise.all(
+    topics.map(async (t) => [t.id, await getOaRuntimeShape(t.id)]),
+  );
+  currentOaShapes = Object.fromEntries(oaEntries);
   renderWeeks();
   startTimerLoop();
 
-  // Background weeks refresh — pulls Firestore, auto-seeds if empty.
-  refreshWeeks();
-
-  // Background third-card progress refresh — storage.onChanged fires
-  // re-render when the bundle lands.
+  // Background progress refreshes — storage.onChanged fires re-render
+  // when either bundle lands.
   refreshProgress(netID);
+  refreshAssignmentProgress(netID);
 
   // Background student-doc refresh — pulls Firestore, writes to cache,
   // storage.onChanged fires re-render.
@@ -302,10 +322,7 @@ async function initWeeks(netID) {
 }
 
 // One-second tick that surgically updates the active OA timer text and
-// auto-ends the attempt when time hits zero. Only runs while there's a
-// TIMED active session (attempt 1); untimed attempts (attempts 2 and 3,
-// open-window model) don't need a tick — the card just shows "in
-// progress" and waits for the student to click Submit.
+// auto-ends the attempt when time hits zero.
 function startTimerLoop() {
   stopTimerLoop();
   if (!currentActiveOa || currentActiveOa.deadlineMs == null) return;
@@ -317,20 +334,19 @@ function startTimerLoop() {
     }
     const remaining = getRemainingMs(session);
     const timerEl = document.querySelector(
-      `[data-oa-timer="${session.weekNum}"]`
+      `[data-oa-timer="${session.weekNum}"]`,
     );
     if (timerEl) {
       timerEl.textContent = "⏱ " + formatRemaining(remaining);
     }
     if (remaining !== null && remaining <= 0) {
       stopTimerLoop();
-      const week = currentWeeks.find((w) => w.weekNum === session.weekNum);
-      const oa = week?.thirdCard;
+      const attemptSpec = await getAttemptSpecForActiveSession();
       await endActiveAttempt({
         netID: currentNetID,
         existingProgress: currentProgress?.[session.weekNum] ?? null,
-        attemptSpec: oa?.attempts?.[session.attemptIndex] ?? null,
-        totalAttempts: oa?.attempts?.length ?? 0,
+        attemptSpec,
+        totalAttempts: attemptSpec ? (await getOaAttemptCountForWeek(session.weekNum)) : 0,
         solves: currentSolves?.solves ?? {},
         reason: "timer",
       });
@@ -345,6 +361,28 @@ function stopTimerLoop() {
   }
 }
 
+// Look up the runtime-shape OA attempt spec for the currently-active OA
+// session. Returns null if no session or the week has no OA (shouldn't
+// happen if an active session exists, but defensive anyway).
+async function getAttemptSpecForActiveSession() {
+  const session = currentActiveOa;
+  if (!session) return null;
+  const oa = await getOaForWeek(session.weekNum);
+  return oa?.attempts?.[session.attemptIndex] ?? null;
+}
+
+async function getOaAttemptCountForWeek(weekNum) {
+  const oa = await getOaForWeek(weekNum);
+  return oa?.attempts?.length ?? 0;
+}
+
+async function getOaForWeek(weekNum) {
+  const cards = await getCardsForWeek(weekNum);
+  const oaItem = cards?.performanceItems?.find((i) => i.type === "oa");
+  if (!oaItem?.topic) return null;
+  return getOaRuntimeShape(oaItem.topic);
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   let needsRender = false;
@@ -353,22 +391,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     needsRender = true;
     maybeAutoPass();
   }
-  if (changes.weeksCatalog) {
-    const next = changes.weeksCatalog.newValue?.weeks;
-    if (Array.isArray(next)) {
-      currentWeeks = next;
-      needsRender = true;
-    }
-  }
   if (changes.weekProgressBundle) {
     currentProgress = changes.weekProgressBundle.newValue?.progress ?? {};
     needsRender = true;
   }
+  if (changes[ASSIGNMENT_PROGRESS_CACHE_KEY]) {
+    currentAssignmentProgress =
+      changes[ASSIGNMENT_PROGRESS_CACHE_KEY].newValue?.progress ?? {};
+    needsRender = true;
+  }
   if (changes[OA_SESSION_KEY]) {
     currentActiveOa = changes[OA_SESSION_KEY].newValue ?? null;
-    // endActiveAttempt updates the local progress cache before clearing
-    // the session, so there's no need to re-fetch here — the
-    // weekProgressBundle change will land alongside this one.
     startTimerLoop();
     needsRender = true;
   }
@@ -377,28 +410,25 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 // Fires whenever solvedProblems changes. If there's an active OA and
 // the fresh solve count meets the pass threshold, auto-end the attempt
-// as passed so the student doesn't have to click Submit. endActiveAttempt
-// re-evaluates against a fresh Firestore fetch on its own, so the local
-// evaluation here is just the "should we even try" gate.
+// as passed so the student doesn't have to click Submit.
 async function maybeAutoPass() {
   const session = currentActiveOa;
   if (!session) return;
-  const week = currentWeeks.find((w) => w.weekNum === session.weekNum);
-  const attempt = week?.thirdCard?.attempts?.[session.attemptIndex];
-  if (!attempt) return;
+  const attemptSpec = await getAttemptSpecForActiveSession();
+  if (!attemptSpec) return;
   const solved = solvedInWindow(
-    attempt,
+    attemptSpec,
     currentSolves?.solves ?? {},
     session.startedAt,
-    Date.now()
+    Date.now(),
   );
-  if (!attemptPassed(attempt, solved.length)) return;
+  if (!attemptPassed(attemptSpec, solved.length)) return;
   try {
     await endActiveAttempt({
       netID: currentNetID,
       existingProgress: currentProgress?.[session.weekNum] ?? null,
-      attemptSpec: attempt,
-      totalAttempts: week.thirdCard.attempts.length,
+      attemptSpec,
+      totalAttempts: await getOaAttemptCountForWeek(session.weekNum),
       solves: currentSolves?.solves ?? {},
       reason: "autopass",
     });
@@ -448,9 +478,6 @@ function wireFullCourseButton() {
   });
 }
 
-// TA-only entry point. Hidden by default in HTML; revealed here if
-// the signed-in user's ID token carries `role: "ta"`. Clicking opens
-// the TA dashboard in the same tab.
 async function wireTaDashboardButton() {
   const btn = document.getElementById("ta-dashboard-btn");
   if (!btn) return;

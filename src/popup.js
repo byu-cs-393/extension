@@ -1,12 +1,9 @@
 import {
-  getWeeks,
-  refreshWeeks,
-  getCurrentWeek,
+  getCurrentWeekCards,
   solvedSlugsInWeek,
-  firstUnsolved,
-} from "./recommended.js";
-
-const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
+  flattenPlacementsToProblems,
+  firstUnsolvedProblem,
+} from "./course-data.js";
 
 // Both panels + the sync pill and footer — the popup toggles between
 // the pre-onboarding welcome and the normal current-week view based on
@@ -26,39 +23,26 @@ const nextBtn = document.getElementById("popup-next-btn");
 const openDashboardBtn = document.getElementById("open-dashboard");
 
 // Module-scoped state — render() reads from these.
-let currentWeeks = [];
+let currentCards = null;
 let currentSolves = null;
 
-function formatDateRange(startMs, endMs) {
-  const start = new Date(startMs);
-  const end = new Date(endMs - 1);
-  const startStr = SHORT_DATE.format(start);
-  if (start.getMonth() === end.getMonth()) {
-    return `${startStr} – ${end.getDate()}`;
-  }
-  return `${startStr} – ${SHORT_DATE.format(end)}`;
-}
-
 function render() {
-  const week = getCurrentWeek(currentWeeks);
-
-  if (!week) {
+  if (!currentCards) {
     weekLabel.textContent = "No active week";
     text.textContent = "— / —";
     fill.style.width = "0%";
     fill.className = "progress-fill";
-    detail.textContent = currentWeeks.length === 0
-      ? "Loading recommended problems…"
-      : "No week scheduled right now.";
+    detail.textContent = "No week scheduled right now.";
     nextBtn.hidden = true;
     return;
   }
 
-  weekLabel.textContent = `Week ${week.weekNum} · ${formatDateRange(week.startDate, week.endDate)}`;
+  weekLabel.textContent = `Week ${currentCards.week} · ${currentCards.dates ?? ""}`;
 
-  const total = week.problems.length;
-  const solvedSet = solvedSlugsInWeek(week, currentSolves);
-  const solved = week.problems.filter((p) => solvedSet.has(p.slug)).length;
+  const problems = flattenPlacementsToProblems(currentCards.placements);
+  const total = problems.length;
+  const solvedSet = solvedSlugsInWeek(currentCards, currentSolves);
+  const solved = problems.filter((p) => solvedSet.has(p.slug)).length;
   const pct = total === 0 ? 0 : Math.round((solved / total) * 100);
 
   text.textContent = `${solved} / ${total}`;
@@ -67,7 +51,7 @@ function render() {
   bar.setAttribute("aria-valuenow", String(solved));
   bar.setAttribute("aria-valuemax", String(total));
 
-  const next = firstUnsolved(week, currentSolves);
+  const next = firstUnsolvedProblem(currentCards, currentSolves);
   if (next) {
     detail.textContent = `Currently on: ${next.title}`;
     nextBtn.hidden = false;
@@ -103,28 +87,21 @@ async function init() {
     return;
   }
   showOnboarded();
-  currentWeeks = await getWeeks();
-  const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
+  const [cards, { solvedProblems }] = await Promise.all([
+    getCurrentWeekCards(),
+    chrome.storage.local.get("solvedProblems"),
+  ]);
+  currentCards = cards;
   currentSolves = solvedProblems ?? null;
   render();
-  refreshWeeks();
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  let needsRender = false;
   if (changes.solvedProblems) {
     currentSolves = changes.solvedProblems.newValue ?? null;
-    needsRender = true;
+    render();
   }
-  if (changes.weeksCatalog) {
-    const next = changes.weeksCatalog.newValue?.weeks;
-    if (Array.isArray(next)) {
-      currentWeeks = next;
-      needsRender = true;
-    }
-  }
-  if (needsRender) render();
 });
 
 nextBtn.addEventListener("click", () => {

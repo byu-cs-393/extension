@@ -9,7 +9,13 @@
 
 import { getRole } from "./auth.js";
 import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
-import { getWeeks, refreshWeeks, classifyWeek, solvedSlugsInWeek } from "./recommended.js";
+import {
+  getAllScheduleCards,
+  classifyWeek,
+  solvedSlugsInWeek,
+  flattenPlacementsToProblems,
+} from "./course-data.js";
+import { recordSignoffDecision } from "./assignment-progress.js";
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
@@ -58,7 +64,9 @@ function renderSignoffRow(item, onDecision) {
   const article = document.createElement("article");
   article.className = "signoff-row";
   article.dataset.netid = item.netID;
-  article.dataset.weeknum = String(item.weekNum);
+  if (Number.isFinite(item.weekNum)) {
+    article.dataset.weeknum = String(item.weekNum);
+  }
 
   // The row body (not the Pass/Fail buttons) is a link into the
   // student's detail page. Clicking the buttons should NOT navigate,
@@ -72,8 +80,7 @@ function renderSignoffRow(item, onDecision) {
 
   const title = document.createElement("div");
   title.className = "signoff-title";
-  const topic = item.week?.thirdCard?.topic ?? "topic exam";
-  title.textContent = `${item.studentName} · Week ${item.weekNum} · ${topic}`;
+  title.textContent = signoffRowTitle(item);
   info.appendChild(title);
 
   const meta = document.createElement("div");
@@ -103,13 +110,27 @@ function renderSignoffRow(item, onDecision) {
   return article;
 }
 
+// Human-readable row title. Live interviews aren't tied to a specific
+// week, so they get a special format.
+function signoffRowTitle(item) {
+  if (item.progressType === "live-interview") {
+    const label = item.assignmentId?.startsWith("live-")
+      ? `Live Interview ${item.assignmentId.slice("live-".length)}`
+      : "Live Interview";
+    return `${item.studentName} · ${label}`;
+  }
+  if (item.progressType === "performance") {
+    const topic = item.cards?.topic?.label ?? "performance exam";
+    return `${item.studentName} · Week ${item.weekNum} · ${topic}`;
+  }
+  // Legacy topicExam (from the old weekProgress model).
+  const topic = item.cards?.topic?.label ?? "topic exam";
+  return `${item.studentName} · Week ${item.weekNum} · ${topic}`;
+}
+
 async function renderSignoffQueue() {
   const container = document.getElementById("signoff-list");
   container.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
-
-  // Kick off a weeks refresh in the background so titles are current
-  // if the catalog changed since the cache last synced.
-  refreshWeeks();
 
   const items = await fetchSignoffQueueWithNames();
   container.innerHTML = "";
@@ -129,28 +150,58 @@ async function renderSignoffQueue() {
 
 // Attach netIDs to the parsed student docs by re-parsing the raw
 // Firestore list response. Cheaper than N individual gets.
+//
+// Pulls signoff requests from BOTH:
+//   - weekProgress (legacy topicExam requests, one doc per week)
+//   - assignmentProgress (new-model performance + live-interview
+//     requests, one doc per assignment)
+// Items get a `source` + `progressType` so applyDecision knows which
+// collection + shape to write back to.
 async function fetchSignoffQueueWithNames() {
-  const [studentsList, weeks] = await Promise.all([
+  const [studentsList, cardsList] = await Promise.all([
     fetchStudentsWithIds(),
-    getWeeks(),
+    getAllScheduleCards(),
   ]);
-  const weekByNum = Object.fromEntries(weeks.map((w) => [w.weekNum, w]));
+  const cardsByWeek = Object.fromEntries(cardsList.map((c) => [c.week, c]));
 
   const perStudent = await Promise.all(
     studentsList.map(async ({ netID, data }) => {
-      const progressDocs = await fetchCollection(
-        `students/${netID}/weekProgress`
-      );
-      return progressDocs
-        .filter((p) => p?.type === "topicExam" && p?.status === "requested")
-        .map((p) => ({
+      const [weekDocs, assignmentDocs] = await Promise.all([
+        fetchCollection(`students/${netID}/weekProgress`),
+        fetchCollection(`students/${netID}/assignmentProgress`),
+      ]);
+      const items = [];
+      // Legacy — topicExam requests still on weekProgress.
+      for (const p of weekDocs) {
+        if (p?.type !== "topicExam" || p?.status !== "requested") continue;
+        items.push({
           netID,
           studentName: data?.name || netID,
           weekNum: p.weekNum,
+          source: "weekProgress",
+          progressType: "topicExam",
           progress: p,
-          week: weekByNum[p.weekNum] ?? null,
+          cards: cardsByWeek[p.weekNum] ?? null,
           requestedAt: p.requestedAt ?? null,
-        }));
+        });
+      }
+      // New — performance + live-interview requests on assignmentProgress.
+      for (const p of assignmentDocs) {
+        if (p?.status !== "requested") continue;
+        if (p?.type !== "performance" && p?.type !== "live-interview") continue;
+        items.push({
+          netID,
+          studentName: data?.name || netID,
+          weekNum: Number.isFinite(p.weekNum) ? p.weekNum : null,
+          assignmentId: p.assignmentId,
+          source: "assignmentProgress",
+          progressType: p.type,
+          progress: p,
+          cards: cardsByWeek[p.weekNum] ?? null,
+          requestedAt: p.requestedAt ?? null,
+        });
+      }
+      return items;
     })
   );
   const flat = perStudent.flat();
@@ -217,25 +268,48 @@ function unwrapFirestoreValue(valueObj) {
 // Signoff decision handler. Optimistic: disables buttons immediately,
 // writes the progress doc, re-renders the queue on success. On
 // failure, re-enables and shows an alert.
+//
+// Routes writes based on item.source:
+//   - "weekProgress" → legacy topicExam path (weekProgress/{weekNum})
+//   - "assignmentProgress" → new path (assignmentProgress/{assignmentId}),
+//     with a grader-rating prompt for live-interview Pass.
 async function applyDecision(item, outcome, passBtn, failBtn) {
   passBtn.disabled = true;
   failBtn.disabled = true;
-  const now = Date.now();
-  const netID = item.netID;
-  const weekNum = item.weekNum;
 
   try {
-    // Merge with existing fields to keep requestedAt/scheduledAt/etc.
-    const existing = await fetchDoc(`students/${netID}/weekProgress/${weekNum}`);
-    const newDoc = {
-      ...(existing ?? {}),
-      type: "topicExam",
-      weekNum,
-      status: outcome, // "passed" | "failed"
-      signoffAt: now,
-    };
-    await patchDoc(`students/${netID}/weekProgress/${weekNum}`, newDoc);
-    // Refresh the queue — the row we just handled falls off.
+    if (item.source === "assignmentProgress") {
+      // For live-interview Pass, prompt the TA for a 1/2/3 grader
+      // rating. Fail doesn't need a rating.
+      let graderRating;
+      if (item.progressType === "live-interview" && outcome === "passed") {
+        graderRating = promptForRating();
+        if (graderRating == null) {
+          passBtn.disabled = false;
+          failBtn.disabled = false;
+          return;
+        }
+      }
+      await recordSignoffDecision({
+        studentNetID: item.netID,
+        taNetID: await getCurrentTaNetID(),
+        assignmentId: item.assignmentId,
+        outcome,
+        ...(graderRating != null ? { graderRating } : {}),
+      });
+    } else {
+      // Legacy path — topicExam on weekProgress.
+      const now = Date.now();
+      const existing = await fetchDoc(`students/${item.netID}/weekProgress/${item.weekNum}`);
+      const newDoc = {
+        ...(existing ?? {}),
+        type: "topicExam",
+        weekNum: item.weekNum,
+        status: outcome,
+        signoffAt: now,
+      };
+      await patchDoc(`students/${item.netID}/weekProgress/${item.weekNum}`, newDoc);
+    }
     await renderSignoffQueue();
   } catch (err) {
     console.error("Signoff decision failed:", err);
@@ -245,6 +319,32 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
   }
 }
 
+// Prompt the TA for a live-interview grader rating (1/2/3). Returns
+// the rating, or null if they cancel or type something invalid.
+function promptForRating() {
+  const raw = window.prompt(
+    "Grader rating for this live interview? Enter 1, 2, or 3.\n" +
+    "  1 — Showed up, went poorly.\n" +
+    "  2 — Got to a solution.\n" +
+    "  3 — Collaborated well, would want to hire.",
+  );
+  if (raw == null) return null;
+  const n = Number.parseInt(raw.trim(), 10);
+  if (![1, 2, 3].includes(n)) {
+    alert("Rating must be 1, 2, or 3. No decision recorded — try again.");
+    return null;
+  }
+  return n;
+}
+
+// The TA's own netID — used to stamp signoff decisions with who
+// approved them. Reads from the TA's chrome.storage.sync same as
+// everyone else's identity.
+async function getCurrentTaNetID() {
+  const { netID } = await chrome.storage.sync.get("netID");
+  return netID || null;
+}
+
 // ---- Struggling students view ------------------------------------------
 
 const INACTIVE_DAYS_THRESHOLD = 7;
@@ -252,13 +352,15 @@ const CURRENT_WEEK_LOW_THRESHOLD = 0.5;
 const OVERALL_LOW_THRESHOLD = 0.5;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// Computes per-student engagement metrics from raw student + week data.
+// Computes per-student engagement metrics from raw student + card data.
 // All metrics are relative to weeks that are past or current — future
 // weeks are excluded so they don't drag down the "overall" number.
-function computeMetrics({ student, netID, weekProgressByNum, weeks }) {
+function computeMetrics({ student, netID, weekProgressByNum, cardsList }) {
   const now = Date.now();
   const solves = student?.solvedProblems ?? {};
-  const visibleWeeks = weeks.filter((w) => w.startDate <= now);
+  const visibleCards = cardsList.filter(
+    (c) => c && c.startMs != null && c.startMs <= now,
+  );
 
   // Last active = latest solve timestamp anywhere.
   let lastActive = 0;
@@ -272,24 +374,24 @@ function computeMetrics({ student, netID, weekProgressByNum, weeks }) {
   // total listed problems on those weeks.
   let listedTotal = 0;
   let listedSolved = 0;
-  for (const week of visibleWeeks) {
-    const problems = Array.isArray(week.problems) ? week.problems : [];
+  for (const cards of visibleCards) {
+    const problems = flattenPlacementsToProblems(cards.placements);
     listedTotal += problems.length;
-    const solvedSet = solvedSlugsInWeek(week, { solves });
+    const solvedSet = solvedSlugsInWeek(cards, { solves });
     listedSolved += problems.filter((p) => solvedSet.has(p.slug)).length;
   }
   const overallRatio = listedTotal === 0 ? 1 : listedSolved / listedTotal;
 
   // Current week: same calc, just for the current week.
-  const currentWeek = visibleWeeks.find(
-    (w) => classifyWeek(w, now) === "current"
+  const currentCards = visibleCards.find(
+    (c) => classifyWeek(c, now) === "current",
   );
   let currentSolved = 0;
   let currentTotal = 0;
-  if (currentWeek) {
-    const problems = Array.isArray(currentWeek.problems) ? currentWeek.problems : [];
+  if (currentCards) {
+    const problems = flattenPlacementsToProblems(currentCards.placements);
     currentTotal = problems.length;
-    const solvedSet = solvedSlugsInWeek(currentWeek, { solves });
+    const solvedSet = solvedSlugsInWeek(currentCards, { solves });
     currentSolved = problems.filter((p) => solvedSet.has(p.slug)).length;
   }
   const currentRatio = currentTotal === 0 ? 1 : currentSolved / currentTotal;
@@ -338,9 +440,9 @@ function computeMetrics({ student, netID, weekProgressByNum, weeks }) {
 }
 
 async function fetchAllStudentsWithProgress() {
-  const [studentsList, weeks, activityByStudent] = await Promise.all([
+  const [studentsList, cardsList, activityByStudent] = await Promise.all([
     fetchStudentsWithIds(),
-    getWeeks(),
+    getAllScheduleCards(),
     fetchActivityCountsByStudent(),
   ]);
 
@@ -362,7 +464,7 @@ async function fetchAllStudentsWithProgress() {
     })
   );
 
-  return { rows: perStudent, weeks };
+  return { rows: perStudent, cardsList };
 }
 
 // Fetches every event in `activity/` and groups counts by netID +
@@ -385,19 +487,19 @@ async function fetchActivityCountsByStudent() {
 }
 
 // For a single student, buckets their activity events into per-week
-// counts (weekNum → { opens, passes, fails }). Uses the week catalog
+// counts (weekNum → { opens, passes, fails }). Uses the card catalog
 // to decide which week each event lands in based on timestamp.
-async function fetchActivityPerWeek(netID, weeks) {
+async function fetchActivityPerWeek(netID, cardsList) {
   const events = await fetchCollection("activity");
   const byWeek = {};
   for (const e of events) {
     if (e?.studentNetID !== netID) continue;
     if (typeof e?.timestamp !== "number") continue;
-    const week = weeks.find(
-      (w) => e.timestamp >= w.startDate && e.timestamp < w.endDate
+    const cards = cardsList.find(
+      (c) => c.startMs != null && e.timestamp >= c.startMs && e.timestamp < c.endMs,
     );
-    if (!week) continue;
-    const wn = week.weekNum;
+    if (!cards) continue;
+    const wn = cards.week;
     const bucket = byWeek[wn] ?? { opens: 0, passes: 0, fails: 0 };
     if (e.eventType === "open_problem") bucket.opens++;
     else if (e.eventType === "submit_pass") bucket.passes++;
@@ -443,7 +545,7 @@ function sortMetrics(metrics, mode) {
   return arr;
 }
 
-function renderStruggling({ rows, weeks }) {
+function renderStruggling({ rows, cardsList }) {
   const container = document.getElementById("struggling-list");
   container.innerHTML = "";
   if (rows.length === 0) {
@@ -459,7 +561,7 @@ function renderStruggling({ rows, weeks }) {
       student: r.student,
       netID: r.netID,
       weekProgressByNum: r.weekProgressByNum,
-      weeks,
+      cardsList,
     }),
     activityCounts: r.activityCounts,
   }));
@@ -542,7 +644,6 @@ function renderStrugglingRow(m) {
 async function loadAndRenderStruggling() {
   const container = document.getElementById("struggling-list");
   container.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
-  refreshWeeks();
   try {
     const data = await fetchAllStudentsWithProgress();
     renderStruggling(data);
@@ -568,9 +669,9 @@ async function loadAndRenderStudentDetail() {
   }
 
   try {
-    const [student, weeks, progressDocs, activityByStudent] = await Promise.all([
+    const [student, cardsList, progressDocs, activityByStudent] = await Promise.all([
       fetchDoc(`students/${selectedNetID}`),
-      getWeeks(),
+      getAllScheduleCards(),
       fetchCollection(`students/${selectedNetID}/weekProgress`),
       fetchActivityCountsByStudent(),
     ]);
@@ -584,12 +685,12 @@ async function loadAndRenderStudentDetail() {
     for (const p of progressDocs) {
       if (Number.isFinite(p?.weekNum)) weekProgressByNum[p.weekNum] = p;
     }
-    const activityPerWeek = await fetchActivityPerWeek(selectedNetID, weeks);
+    const activityPerWeek = await fetchActivityPerWeek(selectedNetID, cardsList);
 
     renderStudentDetail({
       student,
       netID: selectedNetID,
-      weeks,
+      cardsList,
       weekProgressByNum,
       activityCounts: activityByStudent[selectedNetID] ?? { opens: 0, passes: 0, fails: 0 },
       activityPerWeek,
@@ -634,7 +735,7 @@ function renderStudentNotFound(netID) {
   body.appendChild(linkP);
 }
 
-function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activityCounts, activityPerWeek }) {
+function renderStudentDetail({ student, netID, cardsList, weekProgressByNum, activityCounts, activityPerWeek }) {
   const header = document.getElementById("student-detail-header");
   const body = document.getElementById("student-detail-body");
   header.innerHTML = "";
@@ -644,7 +745,7 @@ function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activit
     student,
     netID,
     weekProgressByNum,
-    weeks,
+    cardsList,
   });
 
   // Header block
@@ -684,9 +785,9 @@ function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activit
 
   // Body: per-week breakdown
   const now = Date.now();
-  const visible = [...weeks]
-    .filter((w) => w.startDate <= now)
-    .sort((a, b) => b.weekNum - a.weekNum);
+  const visible = [...cardsList]
+    .filter((c) => c.startMs != null && c.startMs <= now)
+    .sort((a, b) => b.week - a.week);
 
   const h2 = document.createElement("h2");
   h2.textContent = "Weekly breakdown";
@@ -703,31 +804,31 @@ function renderStudentDetail({ student, netID, weeks, weekProgressByNum, activit
 
   const table = document.createElement("div");
   table.className = "weekly-breakdown";
-  for (const week of visible) {
+  for (const cards of visible) {
     table.appendChild(
       renderWeekBreakdownRow(
-        week,
+        cards,
         student,
-        weekProgressByNum[week.weekNum],
-        activityPerWeek?.[week.weekNum]
-      )
+        weekProgressByNum[cards.week],
+        activityPerWeek?.[cards.week],
+      ),
     );
   }
   body.appendChild(table);
 }
 
-function renderWeekBreakdownRow(week, student, progress, weekActivity) {
+function renderWeekBreakdownRow(cards, student, progress, weekActivity) {
   const row = document.createElement("div");
   row.className = "weekly-row";
 
   const label = document.createElement("div");
   label.className = "weekly-label";
-  label.textContent = `Week ${week.weekNum}`;
+  label.textContent = `Week ${cards.week}`;
   row.appendChild(label);
 
-  const problems = Array.isArray(week.problems) ? week.problems : [];
+  const problems = flattenPlacementsToProblems(cards.placements);
   const solves = student?.solvedProblems ?? {};
-  const solvedSet = solvedSlugsInWeek(week, { solves });
+  const solvedSet = solvedSlugsInWeek(cards, { solves });
   const solved = problems.filter((p) => solvedSet.has(p.slug)).length;
 
   const recCell = document.createElement("div");
@@ -738,26 +839,22 @@ function renderWeekBreakdownRow(week, student, progress, weekActivity) {
     recCell.classList.add("cell-low");
   row.appendChild(recCell);
 
+  // Performance-items cell — summarizes each item on this week. Progress
+  // lookup is best-effort: today's weekProgress doc is single-typed, so
+  // only OLD-style OA / topic exam / mock statuses can be resolved
+  // against the new `type` set. Everything else shows a bare label until
+  // the per-assignment progress model lands in Phase 3.
   const tcCell = document.createElement("div");
   tcCell.className = "weekly-cell";
-  if (!week.thirdCard?.type) {
+  const items = cards.performanceItems ?? [];
+  if (items.length === 0) {
     tcCell.textContent = "—";
     tcCell.classList.add("cell-none");
   } else {
-    const t = week.thirdCard.type;
-    const label = t === "topicExam" ? "Topic Exam"
-      : t === "onlineAssessment" ? "OA"
-      : t === "mockInterview" ? "Mock Interview"
-      : t;
-    let statusText = "not attempted";
-    if (progress) {
-      if (t === "topicExam") statusText = progress.status ?? "not attempted";
-      else if (t === "onlineAssessment") statusText = progress.finalStatus ?? "in progress";
-      else if (t === "mockInterview") statusText = progress.status ?? "not attempted";
-    }
-    tcCell.textContent = `${label}: ${statusText}`;
-    if (statusText === "passed" || statusText === "completed") tcCell.classList.add("cell-done");
-    else if (statusText === "failed") tcCell.classList.add("cell-low");
+    const summaries = items.map((it) => summarizePerformanceItem(it, progress));
+    tcCell.textContent = summaries.map((s) => s.text).join(" · ");
+    if (summaries.some((s) => s.tone === "done")) tcCell.classList.add("cell-done");
+    else if (summaries.some((s) => s.tone === "low")) tcCell.classList.add("cell-low");
   }
   row.appendChild(tcCell);
 
@@ -777,6 +874,39 @@ function renderWeekBreakdownRow(week, student, progress, weekActivity) {
   row.appendChild(visitCell);
 
   return row;
+}
+
+// Compact per-item label + status for the weekly-breakdown row. Returns
+// { text, tone } where tone is "done" | "low" | null (used for cell
+// coloring).
+function summarizePerformanceItem(item, progress) {
+  const kind = shortItemLabel(item);
+  // The single weekProgress doc for this week can only carry ONE type's
+  // status. If it matches this item, render it; otherwise show a bare
+  // label. Migrating to per-assignment progress lifts this restriction.
+  if (progress) {
+    if (item.type === "oa" && progress.type === "onlineAssessment") {
+      const s = progress.finalStatus ?? "in progress";
+      return { text: `${kind}: ${s}`, tone: s === "passed" ? "done" : s === "failed" ? "low" : null };
+    }
+    if (item.type === "performance" && progress.type === "topicExam") {
+      const s = progress.status ?? "not attempted";
+      return { text: `${kind}: ${s}`, tone: s === "passed" ? "done" : s === "failed" ? "low" : null };
+    }
+  }
+  return { text: kind, tone: null };
+}
+
+function shortItemLabel(item) {
+  switch (item.type) {
+    case "oa": return "OA";
+    case "performance": return "Perf Exam";
+    case "peer-mock": return "Peer Mock";
+    case "live-interview": return item.index ? `Live ${item.index}` : "Live";
+    case "professional-mock": return "Prof Mock";
+    case "final": return "Final";
+    default: return item.type ?? "?";
+  }
 }
 
 // ---- Routing -----------------------------------------------------------
