@@ -197,7 +197,7 @@ export function studyAssignmentIdForWeek(weekNum) {
 // 2026 to keep this synchronous; if the term ever changes, update
 // SEMESTER_YEAR here.
 
-const SEMESTER_YEAR = 2026;
+const SEMESTER_YEAR = 2025;
 
 const MONTHS = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
@@ -306,6 +306,28 @@ export function firstUnsolvedProblem(cards, solvesBundle) {
   const problems = flattenPlacementsToProblems(cards.placements);
   const solved = solvedSlugsInWeek(cards, solvesBundle);
   return problems.find((p) => !solved.has(p.slug)) ?? null;
+}
+
+// Placement items with tag "required" or "in class" — the ones the
+// Weekly Study submission template asks for. Mirrors the filter the
+// professor's build/canvas_content.py applies for study assignments
+// (_template_md `typ == "study"`). Returns `[{url, tag}]` in the order
+// they appear across all buckets (class/class1/class2/outside).
+//
+// Items without a URL (free-form notes like "Do 5 more easy problems")
+// are dropped — the template's URL slot doesn't have a place for them.
+export function studyProblemsForWeek(cards) {
+  if (!cards) return [];
+  const out = [];
+  for (const bucket of Object.values(cards.placements ?? {})) {
+    if (!Array.isArray(bucket)) continue;
+    for (const item of bucket) {
+      if (!item?.url) continue;
+      if (item.tag !== "required" && item.tag !== "in class") continue;
+      out.push({ url: item.url, tag: item.tag, title: item.name });
+    }
+  }
+  return out;
 }
 
 // ---- OA translation for the runtime renderer --------------------------

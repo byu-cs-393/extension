@@ -46,6 +46,8 @@ import {
   resetOa,
 } from "./oa-session.js";
 import { requestSignoff, submitSelfRating } from "./assignment-progress.js";
+import { fillOaTemplate } from "./submission-templates.js";
+import { openSubmissionForm } from "./submission-form.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
 
@@ -134,13 +136,13 @@ function renderOaFromCourseItem(item, progress, weekStatus, ctx) {
   return renderOnlineAssessment(runtime, progress, weekStatus, ctx);
 }
 
-// ---- Placeholder renderers for new course.json types -------------------
+// ---- Renderers for new course.json types -------------------------------
 //
-// These are display-only for now. Step 5 will add full progress tracking
-// (per-assignment progress docs, TA signoff flows for perf/live, partner
-// pairing for peer-mock, etc). Kept minimal on purpose so we can see the
-// dashboard layout at multi-card granularity before we commit to signoff
-// data shapes.
+// Non-signoff types (peer-mock, professional-mock) get an always-visible
+// "Submit to Canvas" button per the user's UX decision. Signoff types
+// (performance, live-interview) get the button AFTER TA Pass.
+// The Weekly Study card is rendered by dashboard.js (recommended
+// problems section), not here.
 
 function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
   const article = makeCard();
@@ -152,8 +154,16 @@ function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
 
   if (status === "passed") {
     addStatusLine(article, "✓ Passed", "complete");
-    // Rare — but if the student wants to retake, allow it (matches the
-    // "you can always retry to improve" spirit of the topic exams).
+    // After Pass, the student submits to Canvas with the fields the
+    // performance-exam template asks for (date, URL, duration, etc.).
+    appendCanvasSubmitAffordance(article, item, ap, ctx, {
+      prefill: {
+        date: todayIso(),
+        workedWith: ap?.signoffTaNetID ?? "",
+        attemptNum: 1,
+      },
+    });
+    // Retakeable — rare but supported.
     appendRequestButton(article, item, ap, ctx, "Request re-signoff");
     return article;
   }
@@ -194,11 +204,14 @@ function appendRequestButton(article, item, existingProgress, ctx, label) {
   });
 }
 
-function renderCoursePeerMock(item, _progress, _weekStatus) {
+function renderCoursePeerMock(item, _progress, _weekStatus, ctx) {
   const article = makeCard();
   addTitle(article, item.title ?? "Peer Mock Interview");
   addDetail(article, "Pair with a classmate this week.");
-  addStatusLine(article, "Pairing flow coming soon");
+  const ap = ctx?.assignmentProgress?.[item.assignmentId] ?? null;
+  appendCanvasSubmitAffordance(article, item, ap, ctx, {
+    prefill: { when: todayIso() },
+  });
   return article;
 }
 
@@ -224,6 +237,16 @@ function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
       // Prompt the student to self-rate — required to fully complete
       // the live interview per the professor's rubric.
       appendSelfRatingRow(article, item, ctx);
+    }
+    // After self-rating, offer the Canvas submit. Gate on selfRating
+    // being present so the submission has the full picture.
+    if (Number.isInteger(ap?.selfRating)) {
+      appendCanvasSubmitAffordance(article, item, ap, ctx, {
+        prefill: {
+          date: todayIso(),
+          selfRating: String(ap.selfRating),
+        },
+      });
     }
     // Live interviews are always retakeable — the professor explicitly
     // wants students to try before they feel ready.
@@ -278,11 +301,12 @@ function appendSelfRatingRow(article, item, ctx) {
   article.appendChild(wrapper);
 }
 
-function renderCourseProfessionalMock(item, _progress, _weekStatus) {
+function renderCourseProfessionalMock(item, _progress, _weekStatus, ctx) {
   const article = makeCard();
   addTitle(article, item.title ?? "Professional Mock Interview");
   addDetail(article, "One-on-one with someone working in industry (takes ~a month to line up).");
-  addStatusLine(article, "Submission flow coming soon");
+  const ap = ctx?.assignmentProgress?.[item.assignmentId] ?? null;
+  appendCanvasSubmitAffordance(article, item, ap, ctx);
   return article;
 }
 
@@ -438,6 +462,7 @@ function renderOnlineAssessment(card, progress, _weekStatus, ctx) {
   if (finalStatus === "passed") {
     const which = progress?.currentAttempt ?? "?";
     addStatusLine(article, `✓ Passed (attempt ${which} of ${totalAttempts})`, "complete");
+    appendCanvasSubmitRow(article, card, progress, ctx);
     appendResetIfProgress(article, ctx, progress, activeForThisWeek);
     return article;
   }
@@ -605,6 +630,171 @@ function addOaTitleRow(article, topic, timerContent, weekNum) {
   }
 
   article.appendChild(row);
+}
+
+// Adds a "Submit to Canvas" button (or a "✓ Submitted" receipt) at the
+// bottom of a passed OA card. On click: fills the OA template with the
+// student's attempt# + accepted problem URLs from the passing attempt,
+// forwards to the background service worker's submitCanvasAssignment
+// handler (which POSTs to the Cloud Function which POSTs to Canvas with
+// masquerade), then patches the progress doc with canvasSubmittedAt so
+// this button doesn't re-appear.
+//
+// One-click confirm per user preference (not fully auto): student
+// sees the button and decides when to submit.
+//
+// Idempotency: guarded by progress.canvasSubmittedAt. If set, we show
+// the receipt instead of the button. Firestore rules allow the student
+// to write additional fields on their own weekProgress doc.
+function appendCanvasSubmitRow(article, card, progress, ctx) {
+  if (!ctx?.netID || !card?.topic) return;
+  const assignmentId = `oa-${card.topic}`;
+
+  if (progress?.canvasSubmittedAt) {
+    const line = document.createElement("div");
+    line.className = "card-detail canvas-submit-receipt";
+    line.textContent = `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
+    article.appendChild(line);
+    return;
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+  const btn = document.createElement("button");
+  btn.className = "btn-primary";
+  btn.textContent = "Submit to Canvas";
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Submitting…";
+    try {
+      const attemptIdx = (progress?.currentAttempt ?? 1) - 1;
+      const attempt = progress?.attempts?.[attemptIdx];
+      const solvedSlugs = attempt?.solvedSlugs ?? [];
+      const acceptedUrls = solvedSlugs.map(
+        (slug) => `https://leetcode.com/problems/${slug}/`,
+      );
+      const body = fillOaTemplate({
+        attemptNum: progress?.currentAttempt ?? attemptIdx + 1,
+        acceptedUrls,
+      });
+      const result = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            type: "submitCanvasAssignment",
+            payload: {
+              assignmentId,
+              submissionType: "online_text_entry",
+              body,
+            },
+          },
+          (r) => resolve(r),
+        );
+      });
+      if (result?.outcome !== "submitted") {
+        console.error("[CS 393 Buddy] Canvas submit failed:", result);
+        alert(
+          `Couldn't submit to Canvas.\n\n${
+            result?.canvasError ??
+            result?.reason ??
+            result?.outcome ??
+            "unknown error"
+          }`,
+        );
+        btn.disabled = false;
+        btn.textContent = originalText;
+        return;
+      }
+      // Patch the weekProgress doc + local cache so this card re-renders
+      // as "✓ Submitted" without waiting for a Firestore refetch.
+      const submittedAt = Date.now();
+      const newProgress = {
+        ...(progress ?? {}),
+        type: "onlineAssessment",
+        weekNum: ctx.weekNum,
+        canvasSubmittedAt: submittedAt,
+        canvasSubmissionId: result.canvasSubmissionId ?? null,
+      };
+      try {
+        await patchDoc(`students/${ctx.netID}/weekProgress/${ctx.weekNum}`, newProgress);
+        const cached = await chrome.storage.local.get(PROGRESS_CACHE_KEY);
+        const bundle = cached[PROGRESS_CACHE_KEY] ?? { progress: {} };
+        bundle.progress = { ...(bundle.progress ?? {}), [ctx.weekNum]: newProgress };
+        bundle.syncedAt = Date.now();
+        await chrome.storage.local.set({ [PROGRESS_CACHE_KEY]: bundle });
+      } catch (patchErr) {
+        // Non-fatal: Canvas has the submission; we just failed to record it.
+        // The next refreshProgress round will observe the state via Firestore.
+        console.error("[CS 393 Buddy] Failed to record canvasSubmittedAt:", patchErr);
+      }
+    } catch (err) {
+      console.error("[CS 393 Buddy] Canvas submit threw:", err);
+      alert(`Couldn't submit to Canvas: ${err.message ?? String(err)}`);
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+  actions.appendChild(btn);
+  article.appendChild(actions);
+}
+
+// Small helper used by the Canvas-submit receipt line. Same intent as
+// dashboard.js's formatRelativeTime but locally-scoped so third-card.js
+// doesn't need to import from a UI module.
+function formatRelativeTime(ts) {
+  if (!Number.isFinite(ts)) return "";
+  const seconds = Math.round((ts - Date.now()) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 60) return `${abs}s ago`;
+  if (abs < 3600) return `${Math.round(abs / 60)}m ago`;
+  if (abs < 86400) return `${Math.round(abs / 3600)}h ago`;
+  return `${Math.round(abs / 86400)}d ago`;
+}
+
+function todayIso() {
+  // Local-time YYYY-MM-DD for prefilling <input type="date"> fields.
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+// Shared affordance for cards that write to assignmentProgress. Shows
+// "✓ Submitted to Canvas · <time>" when canvasSubmittedAt is set;
+// otherwise a "Submit to Canvas" button that opens the schema-driven
+// modal for {item.type, item.assignmentId}. Idempotency guard is
+// canvasSubmittedAt on the assignmentProgress doc.
+//
+// Exported so dashboard.js's recommended-problems card (Weekly Study)
+// can reuse the same button/receipt pattern without duplicating.
+export function appendCanvasSubmitAffordance(article, item, progress, ctx, opts = {}) {
+  if (!ctx?.netID || !item?.assignmentId) return;
+
+  if (progress?.canvasSubmittedAt) {
+    const line = document.createElement("div");
+    line.className = "card-detail canvas-submit-receipt";
+    line.textContent = `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
+    article.appendChild(line);
+    return;
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+  const btn = document.createElement("button");
+  btn.className = "btn-primary";
+  btn.textContent = "Submit to Canvas";
+  btn.addEventListener("click", () => {
+    openSubmissionForm({
+      type: item.type,
+      assignmentId: item.assignmentId,
+      weekNum: ctx.weekNum,
+      netID: ctx.netID,
+      prefill: opts.prefill ?? {},
+      extraSubmitData: opts.extraSubmitData ?? {},
+    });
+  });
+  actions.appendChild(btn);
+  article.appendChild(actions);
 }
 
 // Adds a subtle "Reset attempts" link at the bottom of the OA card

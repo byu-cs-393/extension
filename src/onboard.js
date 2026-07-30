@@ -326,6 +326,10 @@ step1Form.addEventListener("submit", async (event) => {
     const fields = {};
     if (name) fields.name = name;
     if (note) fields.note = note;
+    // canvasUserId is REQUIRED for auto-submit to masquerade as this
+    // student. Persist it on the Firestore doc even when name/note are
+    // empty so Cloud Functions can look it up later.
+    if (canvasUserId != null) fields.canvasUserId = canvasUserId;
     if (Object.keys(fields).length > 0) {
       await updateStudent(netID, fields);
     }

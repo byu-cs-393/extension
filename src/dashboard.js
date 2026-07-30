@@ -8,11 +8,14 @@ import {
   flattenPlacementsToProblems,
   getOaRuntimeShape,
   getTopics,
+  studyProblemsForWeek,
+  studyAssignmentIdForWeek,
 } from "./course-data.js";
 import {
   createThirdCardSection,
   getCachedProgress,
   refreshProgress,
+  appendCanvasSubmitAffordance,
 } from "./third-card.js";
 import {
   getCachedAssignmentProgress,
@@ -245,6 +248,27 @@ function createRecommendedCard(cards, status) {
     meta.textContent = `Week ended — no more credit.`;
   }
   article.appendChild(meta);
+
+  // Weekly Study submission — the recommended-problems card is the
+  // student-facing surface for the study-w{N} assignment. We pre-fill
+  // the `problems[]` extra field with the week's required + in-class
+  // items so the submitted template lists them; the student fills in
+  // hours + growth via the modal.
+  if (cards.hasStudy) {
+    const studyItem = {
+      type: "study",
+      assignmentId: studyAssignmentIdForWeek(cards.week),
+    };
+    const studyProgress = currentAssignmentProgress?.[studyItem.assignmentId] ?? null;
+    appendCanvasSubmitAffordance(article, studyItem, studyProgress, {
+      netID: currentNetID,
+      weekNum: cards.week,
+    }, {
+      extraSubmitData: {
+        problems: studyProblemsForWeek(cards),
+      },
+    });
+  }
 
   return article;
 }

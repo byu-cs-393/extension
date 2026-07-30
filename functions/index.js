@@ -35,6 +35,14 @@ const canvasToken = defineSecret("CANVAS_API_TOKEN");
 
 const CANVAS_BASE = "https://byu.instructure.com";
 
+// Stable-id -> Canvas-numeric-id map, vendored from the professor's
+// build/deploy.fall-2026.json via scripts/vendor-course.js. Contains:
+//   { course, host, groups, assignments, pages, modules }
+// where `assignments` maps e.g. "oa-graphs" -> 1387098. If this file is
+// missing, require() throws at cold-start — which is what we want:
+// deploy will fail loudly instead of silently returning 500s at runtime.
+const DEPLOY_MAP = require("./deploy.fall-2026.json");
+
 // netID: starts with a lowercase letter, then up to 15 letters/digits.
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
 // lti_user_id is a 40-char hex (SHA-1) hash.
@@ -1232,3 +1240,199 @@ exports.seedDummyStudents = onRequest(
     });
   }
 );
+
+// ============================================================================
+// submitCanvasAssignment — POST a filled submission to Canvas AS the student
+// ============================================================================
+//
+// Called by the extension when a student action produces a completed
+// submission body (e.g., OA passed → attempt# + accepted URLs).
+//
+// Uses masquerade (?as_user_id=<studentCanvasId>) so Canvas records the
+// submission as coming from the student, not from the shared token
+// holder. Requires the CANVAS_API_TOKEN to have `become_user` account
+// permission — verified manually.
+//
+// Request (POST, application/json):
+//   {
+//     "assignmentId": "oa-graphs",         // stable id from course.json
+//     "submissionType": "online_text_entry" | "online_url",
+//     "body": "..."   // for online_text_entry
+//     "url": "..."    // for online_url
+//   }
+// Auth: Bearer <Firebase ID token>. netID is derived from the token —
+// caller can't pretend to submit on someone else's behalf.
+//
+// Response: { outcome, canvasSubmissionId?, canvasStatus, ... }
+// Outcomes:
+//   "submitted"                — Canvas accepted; canvasSubmissionId returned
+//   "skipped-no-assignment"    — stable id not in deploy map
+//   "skipped-no-user"          — student doc missing canvasUserId
+//   "skipped-no-student"       — student doc doesn't exist yet
+//   "canvas-error"             — Canvas rejected; canvasStatus + canvasError set
+exports.submitCanvasAssignment = onRequest(
+  {
+    secrets: [canvasToken],
+    region: "us-central1",
+    cors: true,
+  },
+  async (req, res) => {
+    // Manual CORS (same reasoning as pushMyRecentGrade — Firebase
+    // Hosting can intercept OPTIONS preflights before the function's
+    // own cors middleware runs when routed through the /api/ rewrite).
+    const origin = req.get("origin") ?? "*";
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Max-Age", "3600");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    // Auth: verify Firebase ID token, derive netID.
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (_err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    const netID = decoded.uid;
+
+    // Body validation.
+    const { assignmentId, submissionType, body, url } = req.body ?? {};
+    if (typeof assignmentId !== "string" || !assignmentId) {
+      res.status(400).json({ error: "Missing assignmentId.", code: "invalid-argument" });
+      return;
+    }
+    if (submissionType !== "online_text_entry" && submissionType !== "online_url") {
+      res.status(400).json({
+        error: "submissionType must be 'online_text_entry' or 'online_url'.",
+        code: "invalid-argument",
+      });
+      return;
+    }
+    if (submissionType === "online_text_entry" && (typeof body !== "string" || !body)) {
+      res.status(400).json({ error: "Missing body for online_text_entry.", code: "invalid-argument" });
+      return;
+    }
+    if (submissionType === "online_url" && (typeof url !== "string" || !url)) {
+      res.status(400).json({ error: "Missing url for online_url.", code: "invalid-argument" });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const db = getFirestore();
+    const runId = `submit-${startedAt}-${netID}-${assignmentId}`;
+
+    const canvasAssignmentId = DEPLOY_MAP.assignments?.[assignmentId] ?? null;
+    if (canvasAssignmentId == null) {
+      const out = {
+        runId, netID, assignmentId,
+        outcome: "skipped-no-assignment",
+        reason: `stable id not in deploy map`,
+      };
+      await logRun(db, runId, { ...out, startedAt, finishedAt: Date.now() });
+      res.status(200).json(out);
+      return;
+    }
+
+    const studentSnap = await db.doc(`students/${netID}`).get();
+    if (!studentSnap.exists) {
+      const out = {
+        runId, netID, assignmentId,
+        outcome: "skipped-no-student",
+      };
+      await logRun(db, runId, { ...out, startedAt, finishedAt: Date.now() });
+      res.status(200).json(out);
+      return;
+    }
+    const canvasUserId = studentSnap.data()?.canvasUserId ?? null;
+    if (canvasUserId == null) {
+      const out = {
+        runId, netID, assignmentId, canvasAssignmentId,
+        outcome: "skipped-no-user",
+        reason: "student doc missing canvasUserId — check onboarding",
+      };
+      await logRun(db, runId, { ...out, startedAt, finishedAt: Date.now() });
+      res.status(200).json(out);
+      return;
+    }
+
+    // POST the submission to Canvas, masquerading as the student.
+    const canvasCourseId = DEPLOY_MAP.course ?? 35464;
+    const canvasUrl =
+      `${CANVAS_BASE}/api/v1/courses/${canvasCourseId}` +
+      `/assignments/${canvasAssignmentId}/submissions` +
+      `?as_user_id=${encodeURIComponent(canvasUserId)}`;
+
+    const form = new URLSearchParams();
+    form.set("submission[submission_type]", submissionType);
+    if (submissionType === "online_text_entry") form.set("submission[body]", body);
+    else form.set("submission[url]", url);
+
+    let canvasStatus = 0;
+    let canvasBody = null;
+    let canvasError = null;
+    try {
+      const resp = await fetch(canvasUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${canvasToken.value()}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: form,
+      });
+      canvasStatus = resp.status;
+      const raw = await resp.text();
+      try { canvasBody = raw ? JSON.parse(raw) : null; } catch { canvasBody = { raw }; }
+      if (!resp.ok) canvasError = canvasBody?.errors ?? canvasBody?.raw ?? `HTTP ${resp.status}`;
+    } catch (err) {
+      canvasError = err.message ?? String(err);
+    }
+
+    const finishedAt = Date.now();
+    if (canvasError) {
+      const out = {
+        runId, netID, assignmentId, canvasAssignmentId, canvasUserId,
+        outcome: "canvas-error",
+        canvasStatus, canvasError,
+      };
+      await logRun(db, runId, { ...out, startedAt, finishedAt });
+      res.status(200).json(out);
+      return;
+    }
+
+    const out = {
+      runId, netID, assignmentId, canvasAssignmentId, canvasUserId,
+      outcome: "submitted",
+      canvasStatus,
+      canvasSubmissionId: canvasBody?.id ?? null,
+      submittedAt: canvasBody?.submitted_at ?? null,
+    };
+    await logRun(db, runId, { ...out, startedAt, finishedAt });
+    res.status(200).json(out);
+  }
+);
+
+async function logRun(db, runId, doc) {
+  try {
+    await db.doc(`gradeSyncLog/${runId}`).set(doc);
+  } catch (err) {
+    // Non-fatal — we've already done (or attempted) the Canvas call.
+    console.error(`[submitCanvasAssignment] logRun failed for ${runId}:`, err);
+  }
+}

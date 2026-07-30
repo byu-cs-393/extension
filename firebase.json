@@ -64,6 +64,13 @@
           "serviceId": "seeddummystudents",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/submitCanvasAssignment",
+        "run": {
+          "serviceId": "submitcanvasassignment",
+          "region": "us-central1"
+        }
       }
     ]
   }

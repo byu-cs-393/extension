@@ -181,10 +181,20 @@ service cloud.firestore {
     }
 
     function isValidAssignmentProgress(data, assignmentId) {
+      // Allow every assignment type the extension might mark progress
+      // on. Signoff types (performance, live-interview) already used
+      // this collection; adding the self-report types + connect + study
+      // + instructor + extra-credit so any card's Canvas-submit flow
+      // can drop a marker (canvasSubmittedAt + submissionId) here.
       return 'assignmentId' in data
           && data.assignmentId == assignmentId
           && 'type' in data
-          && data.type in ['performance', 'live-interview', 'peer-mock', 'professional-mock'];
+          && data.type in [
+              'performance', 'live-interview',
+              'peer-mock', 'professional-mock',
+              'instructor-interview', 'connect-with-class', 'study',
+              'extra-credit'
+            ];
     }
 
     // ---- students/{netID}/keystrokeSessions/{sessionId} ----------------
