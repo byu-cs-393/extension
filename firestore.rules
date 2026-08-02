@@ -51,7 +51,8 @@ service cloud.firestore {
 
     function isValidStudentDoc(data) {
       return data.keys().hasOnly([
-        'name', 'note', 'leetcodeUsername', 'solvedProblems', 'canvasUserId'
+        'name', 'note', 'leetcodeUsername', 'solvedProblems', 'canvasUserId',
+        'solutionUrls'
       ]);
     }
 

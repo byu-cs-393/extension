@@ -150,15 +150,21 @@ async function logVerdict(slug, verdict) {
 // Firestore call is slow or fails.
 async function markSolved(slug) {
   const solvedAt = Date.now();
+  // Try to capture the per-submission URL synchronously from the
+  // current page. If the tab is on /problems/{slug}/submissions/{id}/,
+  // we can grab the id right now instead of waiting for the backstop.
+  const capturedUrl = submissionUrlFromLocation(slug);
   try {
     const { solvedProblems } = await chrome.storage.local.get("solvedProblems");
     const solves = { ...(solvedProblems?.solves ?? {}) };
+    const solutions = { ...(solvedProblems?.solutions ?? {}) };
     // Always overwrite with the new timestamp — a fresh accepted
     // submission for a previously-solved problem still counts for
     // whatever week it lands in.
     solves[slug] = solvedAt;
+    if (capturedUrl) solutions[slug] = capturedUrl;
     await chrome.storage.local.set({
-      solvedProblems: { solves, syncedAt: Date.now() },
+      solvedProblems: { solves, solutions, syncedAt: Date.now() },
     });
   } catch (error) {
     console.error("[CS 393 Buddy] failed to update solved cache:", error);
@@ -166,11 +172,16 @@ async function markSolved(slug) {
 
   let firestoreOk = false;
   try {
-    const existing = await fetchSolvedProblemsFromFirestore(netID);
-    const updated = { ...existing, [slug]: solvedAt };
-    await writeSolvedProblemsToFirestore(netID, updated);
+    const existing = await fetchStudentSolvesAndUrls(netID);
+    const updatedSolves = { ...existing.solves, [slug]: solvedAt };
+    const updatedUrls = { ...existing.solutionUrls };
+    if (capturedUrl) updatedUrls[slug] = capturedUrl;
+    await writeSolvedAndUrlsToFirestore(netID, updatedSolves, updatedUrls);
     firestoreOk = true;
-    console.log(`[CS 393 Buddy] persisted solved: ${slug} @ ${new Date(solvedAt).toISOString()}`);
+    console.log(
+      `[CS 393 Buddy] persisted solved: ${slug} @ ${new Date(solvedAt).toISOString()}` +
+      (capturedUrl ? ` (url captured)` : ``)
+    );
   } catch (error) {
     console.error("[CS 393 Buddy] failed to persist solved to Firestore:", error);
   }
@@ -222,38 +233,51 @@ function firePushMyRecentGrade(slug) {
   );
 }
 
-// Returns a map of { slug: timestampMs }. Tolerates 404 (no student doc
-// yet) and legacy array shape from the previous schema.
-async function fetchSolvedProblemsFromFirestore(netID) {
+// Returns { solves: {slug: ms}, solutionUrls: {slug: url} }. Tolerates
+// 404 (no student doc yet).
+async function fetchStudentSolvesAndUrls(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url, { headers: await authedHeaders() });
-  if (response.status === 404) return {};
+  if (response.status === 404) return { solves: {}, solutionUrls: {} };
   if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
   const data = await response.json();
-  const field = data.fields?.solvedProblems;
-  if (!field) return {};
-  if (field.mapValue) {
-    const out = {};
-    for (const [slug, valueObj] of Object.entries(field.mapValue.fields ?? {})) {
+  const solves = {};
+  const solvesField = data.fields?.solvedProblems;
+  if (solvesField?.mapValue) {
+    for (const [slug, valueObj] of Object.entries(solvesField.mapValue.fields ?? {})) {
       const ts = Number(valueObj.doubleValue ?? valueObj.integerValue ?? 0);
-      if (slug && ts) out[slug] = ts;
+      if (slug && ts) solves[slug] = ts;
     }
-    return out;
   }
-  return {};
+  const solutionUrls = {};
+  const urlsField = data.fields?.solutionUrls;
+  if (urlsField?.mapValue) {
+    for (const [slug, valueObj] of Object.entries(urlsField.mapValue.fields ?? {})) {
+      const url = valueObj.stringValue;
+      if (slug && typeof url === "string" && url) solutionUrls[slug] = url;
+    }
+  }
+  return { solves, solutionUrls };
 }
 
-async function writeSolvedProblemsToFirestore(netID, solves) {
+// Patches solvedProblems and solutionUrls in one call. Both maps are
+// rewritten wholesale; caller must pass the fully-merged maps.
+async function writeSolvedAndUrlsToFirestore(netID, solves, solutionUrls) {
   const url =
     `${FIRESTORE_BASE}/students/${netID}` +
-    `?updateMask.fieldPaths=solvedProblems&key=${firebaseConfig.apiKey}`;
-  const mapFields = {};
+    `?updateMask.fieldPaths=solvedProblems&updateMask.fieldPaths=solutionUrls&key=${firebaseConfig.apiKey}`;
+  const solvesFields = {};
   for (const [slug, ts] of Object.entries(solves)) {
-    mapFields[slug] = { doubleValue: ts };
+    solvesFields[slug] = { doubleValue: ts };
+  }
+  const urlsFields = {};
+  for (const [slug, u] of Object.entries(solutionUrls)) {
+    if (typeof u === "string" && u) urlsFields[slug] = { stringValue: u };
   }
   const body = {
     fields: {
-      solvedProblems: { mapValue: { fields: mapFields } },
+      solvedProblems: { mapValue: { fields: solvesFields } },
+      solutionUrls: { mapValue: { fields: urlsFields } },
     },
   };
   const response = await fetch(url, {
@@ -266,6 +290,20 @@ async function writeSolvedProblemsToFirestore(netID, solves) {
     throw new Error(`Firestore PATCH ${response.status}: ${errorBody}`);
   }
   return response.json();
+}
+
+// Extract a per-submission URL from `location.pathname` if the current
+// URL is a submission view. LeetCode's URL after a code submission is
+// often "/problems/<slug>/submissions/<id>/", in which case we can
+// capture the ID immediately without waiting for the backstop's
+// GraphQL round-trip.
+function submissionUrlFromLocation(slug) {
+  if (!slug) return null;
+  const m = location.pathname.match(
+    new RegExp(`^/problems/${slug}/submissions/(\\d+)`)
+  );
+  if (!m) return null;
+  return `https://leetcode.com/problems/${slug}/submissions/${m[1]}/`;
 }
 
 // ---- verdict detection --------------------------------------------------

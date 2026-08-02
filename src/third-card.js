@@ -671,8 +671,11 @@ function appendCanvasSubmitRow(article, card, progress, ctx) {
       const attemptIdx = (progress?.currentAttempt ?? 1) - 1;
       const attempt = progress?.attempts?.[attemptIdx];
       const solvedSlugs = attempt?.solvedSlugs ?? [];
+      // Prefer per-submission URLs from the tracker/backstop when
+      // available; fall back to the plain problem URL otherwise.
+      const solutionUrls = ctx?.solutionUrls ?? {};
       const acceptedUrls = solvedSlugs.map(
-        (slug) => `https://leetcode.com/problems/${slug}/`,
+        (slug) => solutionUrls[slug] ?? `https://leetcode.com/problems/${slug}/`,
       );
       const body = fillOaTemplate({
         attemptNum: progress?.currentAttempt ?? attemptIdx + 1,

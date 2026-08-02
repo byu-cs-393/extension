@@ -48,6 +48,7 @@ const USER_STATUS_QUERY = {
 
 const RECENT_AC_QUERY = `query getACSubmissions($username: String!, $limit: Int) {
   recentAcSubmissionList(username: $username, limit: $limit) {
+    id
     titleSlug
     timestamp
   }
@@ -75,6 +76,9 @@ async function fetchUserStatus() {
 }
 
 // LeetCode returns timestamps as strings of Unix seconds. We work in ms.
+// `id` is the LeetCode submission id, which lets us construct the
+// per-submission URL (https://leetcode.com/problems/<slug>/submissions/<id>/)
+// that the Canvas submission templates ask for.
 async function fetchRecentAcceptedSubmissions(username, limit = 20) {
   const json = await graphql({
     operationName: "getACSubmissions",
@@ -87,8 +91,14 @@ async function fetchRecentAcceptedSubmissions(username, limit = 20) {
     .map((item) => ({
       slug: item.titleSlug,
       timestampMs: Number(item.timestamp) * 1000,
+      submissionId: item.id ? String(item.id) : null,
     }))
     .filter((x) => x.slug && Number.isFinite(x.timestampMs));
+}
+
+function submissionUrlFor(slug, submissionId) {
+  if (!slug || !submissionId) return null;
+  return `https://leetcode.com/problems/${slug}/submissions/${submissionId}/`;
 }
 
 // ---- Firestore helpers (inlined; content scripts can't import) --------
@@ -109,32 +119,52 @@ async function authedHeaders(extra = {}) {
   return headers;
 }
 
-async function fetchSolvedProblemsFromFirestore(netID) {
+async function fetchStudentDocFromFirestore(netID) {
   const url = `${FIRESTORE_BASE}/students/${netID}?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url, { headers: await authedHeaders() });
-  if (response.status === 404) return {};
+  if (response.status === 404) return { solves: {}, solutionUrls: {} };
   if (!response.ok) throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
   const data = await response.json();
-  const field = data.fields?.solvedProblems;
-  if (!field?.mapValue) return {};
-  const out = {};
-  for (const [slug, valueObj] of Object.entries(field.mapValue.fields ?? {})) {
-    const ts = Number(valueObj.doubleValue ?? valueObj.integerValue ?? 0);
-    if (slug && ts) out[slug] = ts;
+  const solves = {};
+  const solvesField = data.fields?.solvedProblems;
+  if (solvesField?.mapValue) {
+    for (const [slug, valueObj] of Object.entries(solvesField.mapValue.fields ?? {})) {
+      const ts = Number(valueObj.doubleValue ?? valueObj.integerValue ?? 0);
+      if (slug && ts) solves[slug] = ts;
+    }
   }
-  return out;
+  const solutionUrls = {};
+  const urlsField = data.fields?.solutionUrls;
+  if (urlsField?.mapValue) {
+    for (const [slug, valueObj] of Object.entries(urlsField.mapValue.fields ?? {})) {
+      const url = valueObj.stringValue;
+      if (slug && typeof url === "string" && url) solutionUrls[slug] = url;
+    }
+  }
+  return { solves, solutionUrls };
 }
 
-async function writeSolvedProblemsToFirestore(netID, solves) {
+// Patches solvedProblems and solutionUrls in one call. Both maps are
+// rewritten wholesale (Firestore PATCH with updateMask replaces the
+// listed fields entirely) — callers must pass the fully-merged maps,
+// not just deltas.
+async function writeSolvedAndUrlsToFirestore(netID, solves, solutionUrls) {
   const url =
     `${FIRESTORE_BASE}/students/${netID}` +
-    `?updateMask.fieldPaths=solvedProblems&key=${firebaseConfig.apiKey}`;
-  const mapFields = {};
+    `?updateMask.fieldPaths=solvedProblems&updateMask.fieldPaths=solutionUrls&key=${firebaseConfig.apiKey}`;
+  const solvesFields = {};
   for (const [slug, ts] of Object.entries(solves)) {
-    mapFields[slug] = { doubleValue: ts };
+    solvesFields[slug] = { doubleValue: ts };
+  }
+  const urlsFields = {};
+  for (const [slug, u] of Object.entries(solutionUrls)) {
+    if (typeof u === "string" && u) urlsFields[slug] = { stringValue: u };
   }
   const body = {
-    fields: { solvedProblems: { mapValue: { fields: mapFields } } },
+    fields: {
+      solvedProblems: { mapValue: { fields: solvesFields } },
+      solutionUrls: { mapValue: { fields: urlsFields } },
+    },
   };
   const response = await fetch(url, {
     method: "PATCH",
@@ -169,48 +199,64 @@ async function runBackstop(username) {
   // Cache may have entries not yet in Firestore — the tracker writes
   // cache first, Firestore second, so a failed/in-flight tracker write
   // would leave a divergence we want to reconcile.
-  const [firestoreSolves, cacheBundle] = await Promise.all([
-    fetchSolvedProblemsFromFirestore(netID).catch(() => ({})),
+  const [firestoreDoc, cacheBundle] = await Promise.all([
+    fetchStudentDocFromFirestore(netID).catch(() => ({ solves: {}, solutionUrls: {} })),
     chrome.storage.local.get("solvedProblems"),
   ]);
+  const firestoreSolves = firestoreDoc.solves;
+  const firestoreUrls = firestoreDoc.solutionUrls;
   const cachedSolves = cacheBundle?.solvedProblems?.solves ?? {};
+  const cachedUrls = cacheBundle?.solvedProblems?.solutions ?? {};
 
   // Start from Firestore + cache. Cache wins for any overlap since it
   // reflects the most recent tracker-recorded timestamp.
-  const merged = { ...firestoreSolves, ...cachedSolves };
+  const mergedSolves = { ...firestoreSolves, ...cachedSolves };
+  // solutionUrls: whichever we have, prefer newest source. Cache first
+  // (recent tracker/backstop write), Firestore second.
+  const mergedUrls = { ...firestoreUrls, ...cachedUrls };
   let updated = 0;
-  for (const { slug, timestampMs } of recent) {
-    // Take the max: if the tracker already recorded a more recent
-    // solve, don't downgrade. If LeetCode reports a newer one (a fresh
-    // submission the tracker missed), bump up.
-    const previous = merged[slug] ?? 0;
+  let urlsUpdated = 0;
+  for (const { slug, timestampMs, submissionId } of recent) {
+    const previous = mergedSolves[slug] ?? 0;
     if (timestampMs > previous) {
-      merged[slug] = timestampMs;
+      mergedSolves[slug] = timestampMs;
       updated++;
+    }
+    // Only populate URL if we don't already have one for this slug —
+    // an existing URL is either from a prior backstop run (fine) or a
+    // fresher tracker-side capture (which we shouldn't overwrite with a
+    // possibly-older submission id from the recent list).
+    const url = submissionUrlFor(slug, submissionId);
+    if (url && !mergedUrls[slug]) {
+      mergedUrls[slug] = url;
+      urlsUpdated++;
     }
   }
 
-  // Anything to push? Either updated timestamps, new slugs, or cached
-  // entries the tracker didn't manage to persist.
+  // Anything to push? Either updated timestamps, new slugs, updated
+  // URLs, or cached entries the tracker didn't manage to persist.
   const hasUnpushedFromCache = Object.keys(cachedSolves).some(
     (slug) => !(slug in firestoreSolves) || cachedSolves[slug] > (firestoreSolves[slug] ?? 0)
+  ) || Object.keys(cachedUrls).some(
+    (slug) => !(slug in firestoreUrls),
   );
   console.log(
     `[CS 393 Buddy] backstop: Firestore had ${Object.keys(firestoreSolves).length}, ` +
       `cache had ${Object.keys(cachedSolves).length}, ${updated} updated from recent ACs, ` +
-      `unpushed cache=${hasUnpushedFromCache}`
+      `${urlsUpdated} URLs learned, unpushed cache=${hasUnpushedFromCache}`
   );
-  if (updated === 0 && !hasUnpushedFromCache) return;
-
-  if (updated > 0) console.log(`[CS 393 Buddy] backstop updating ${updated} solve(s) from recent ACs`);
-  if (hasUnpushedFromCache) console.log(`[CS 393 Buddy] backstop reconciling cached solves to Firestore`);
+  if (updated === 0 && urlsUpdated === 0 && !hasUnpushedFromCache) return;
 
   // Cache write first (fast UI), then Firestore (truth).
   await chrome.storage.local.set({
-    solvedProblems: { solves: merged, syncedAt: Date.now() },
+    solvedProblems: {
+      solves: mergedSolves,
+      solutions: mergedUrls,
+      syncedAt: Date.now(),
+    },
   });
   try {
-    await writeSolvedProblemsToFirestore(netID, merged);
+    await writeSolvedAndUrlsToFirestore(netID, mergedSolves, mergedUrls);
   } catch (error) {
     console.error("[CS 393 Buddy] backstop failed to persist to Firestore:", error);
   }

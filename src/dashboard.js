@@ -151,6 +151,7 @@ function createWeekSection(cards, status) {
         netID: currentNetID,
         activeSession: currentActiveOa,
         solves: currentSolves?.solves ?? {},
+        solutionUrls: currentSolves?.solutions ?? {},
         oaShapes: currentOaShapes,
         assignmentProgress: currentAssignmentProgress,
       },
@@ -260,17 +261,29 @@ function createRecommendedCard(cards, status) {
       assignmentId: studyAssignmentIdForWeek(cards.week),
     };
     const studyProgress = currentAssignmentProgress?.[studyItem.assignmentId] ?? null;
+    // Prefer per-submission URLs from the tracker/backstop; fall back
+    // to the plain problem URL if we haven't seen a submission id yet.
+    const solutionUrls = currentSolves?.solutions ?? {};
+    const problems = studyProblemsForWeek(cards).map((p) => {
+      const slug = extractLeetcodeSlug(p.url);
+      const perSubmission = slug ? solutionUrls[slug] : null;
+      return { url: perSubmission ?? p.url, tag: p.tag, title: p.title };
+    });
     appendCanvasSubmitAffordance(article, studyItem, studyProgress, {
       netID: currentNetID,
       weekNum: cards.week,
     }, {
-      extraSubmitData: {
-        problems: studyProblemsForWeek(cards),
-      },
+      extraSubmitData: { problems },
     });
   }
 
   return article;
+}
+
+function extractLeetcodeSlug(url) {
+  if (typeof url !== "string") return null;
+  const m = url.match(/^https:\/\/leetcode\.com\/problems\/([^/?#]+)/);
+  return m ? m[1] : null;
 }
 
 function createProblemItem(p, isSolved) {
@@ -332,13 +345,18 @@ async function initWeeks(netID) {
   refreshAssignmentProgress(netID);
 
   // Background student-doc refresh — pulls Firestore, writes to cache,
-  // storage.onChanged fires re-render.
+  // storage.onChanged fires re-render. Preserves solutionUrls (as
+  // `solutions` in cache) alongside solves, otherwise this refresh
+  // would strip any per-submission URLs the tracker/backstop had
+  // populated.
   try {
     const student = await fetchStudent(netID);
     const raw = student?.solvedProblems;
     const solves = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const rawUrls = student?.solutionUrls;
+    const solutions = rawUrls && typeof rawUrls === "object" && !Array.isArray(rawUrls) ? rawUrls : {};
     await chrome.storage.local.set({
-      solvedProblems: { solves, syncedAt: Date.now() },
+      solvedProblems: { solves, solutions, syncedAt: Date.now() },
     });
   } catch (error) {
     console.error("Failed to fetch solved problems from Firestore:", error);

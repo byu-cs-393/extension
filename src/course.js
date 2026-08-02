@@ -122,6 +122,7 @@ function createWeekSection(cards, status) {
         netID: currentNetID,
         activeSession: currentActiveOa,
         solves: currentSolves?.solves ?? {},
+        solutionUrls: currentSolves?.solutions ?? {},
         oaShapes: currentOaShapes,
         assignmentProgress: currentAssignmentProgress,
       },
@@ -305,8 +306,10 @@ async function init(netID) {
     const student = await fetchStudent(netID);
     const raw = student?.solvedProblems;
     const solves = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const rawUrls = student?.solutionUrls;
+    const solutions = rawUrls && typeof rawUrls === "object" && !Array.isArray(rawUrls) ? rawUrls : {};
     await chrome.storage.local.set({
-      solvedProblems: { solves, syncedAt: Date.now() },
+      solvedProblems: { solves, solutions, syncedAt: Date.now() },
     });
   } catch (error) {
     console.error("Failed to fetch solved problems from Firestore:", error);
