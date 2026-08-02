@@ -1,0 +1,41 @@
+name: test
+
+# Runs the extension's Vitest suite on every push to main and every
+# pull request targeting main. Blocks merge on red so the pure-helper
+# contracts (submission templates, OA session, course-data parsers)
+# can't silently break.
+#
+# Only the root package.json is exercised here — the extension's
+# pure-JS helpers live in src/ and are tested against those. The
+# Cloud Functions in functions/ have their own package.json but no
+# tests yet; add a matching job here when they do.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Match functions/package.json's engines.node so the CI env
+          # matches the runtime env for anything shared. Vitest itself
+          # runs on Node 18+, so this is more than enough.
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        # `npm ci` respects package-lock.json exactly — reproducible
+        # installs, faster than `npm install` for CI.
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run

@@ -14,13 +14,16 @@
 //     pages iterate over. Everything else is a thin wrapper for
 //     one-off lookups (getTopic, getOA, etc.).
 
-const COURSE_JSON_URL = chrome.runtime.getURL("course.json");
-
+// chrome.runtime.getURL is called lazily inside loadCourse (not at
+// module scope) so the module can be imported in Vitest — the pure
+// helpers (parseScheduleDates, classifyWeek, flattenPlacementsToProblems,
+// etc.) are testable in Node without a chrome shim.
 let coursePromise = null;
 
 export async function loadCourse() {
   if (!coursePromise) {
-    coursePromise = fetch(COURSE_JSON_URL).then((response) => {
+    const url = chrome.runtime.getURL("course.json");
+    coursePromise = fetch(url).then((response) => {
       if (!response.ok) {
         throw new Error(`course.json fetch failed: ${response.status}`);
       }
