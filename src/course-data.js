@@ -427,8 +427,9 @@ export function flattenPlacementsToProblems(placements) {
 //     objectives: string[],
 //     placements: {...},         // pass-through from weeks[N]
 //     performanceItems: [        // resolved cards for the Performance column
-//       { type, assignmentId, title, points, category, raw }
-//     ],
+//       { type, assignmentId, title, points, category, assignment, raw }
+//     ],                         // includes gradeable refs promoted out of
+//                                // schedule[N].other (see below)
 //     otherItems: [...]          // pass-through from schedule[N].other
 //   }
 //
@@ -450,6 +451,22 @@ export async function getCardsForWeek(n) {
   const performanceItems = (sched.performance ?? []).map((item) =>
     resolvePerformanceItem(item, n, topics, points, assignments),
   );
+
+  // Two gradeable assignments — Connect with Class (week 1) and the
+  // Instructor Pass/Fail Interview (week 4) — are referenced from
+  // `schedule[N].other` rather than `schedule[N].performance`, but they
+  // still need a card. Promote any `other` entry whose `ref` names a real
+  // standalone assignment. Refs that point at a schedule-level type
+  // instead — week 10's "professional-mock" reminder, whose actual card
+  // lives in week 14 — find nothing in assignments[] and stay put.
+  for (const other of sched.other ?? []) {
+    if (!other?.ref) continue;
+    if (!assignments.some((a) => a.id === other.ref)) continue;
+    if (performanceItems.some((p) => p.assignmentId === other.ref)) continue;
+    performanceItems.push(
+      resolvePerformanceItem(other, n, topics, points, assignments),
+    );
+  }
 
   return {
     week: n,
@@ -480,7 +497,7 @@ function resolvePerformanceItem(item, weekNum, topics, points, assignments) {
   const pts = pointsForItem(item, points, standalone);
 
   return {
-    type: item.type,
+    type: typeForItem(item, standalone),
     assignmentId,
     title,
     points: pts,
@@ -488,10 +505,23 @@ function resolvePerformanceItem(item, weekNum, topics, points, assignments) {
     topic: item.topic ?? null,
     index: item.index ?? null,
     phase: item.phase ?? null,
+    // The matching assignments[] entry, when there is one — carries the
+    // extras only standalone assignments have (desc, doc, gate, teamsUrl).
+    assignment: standalone,
     // Original entry, for callers that want to inspect anything we didn't
     // surface explicitly.
     raw: item,
   };
+}
+
+// The card/template type for an item. Entries in `schedule[N].performance`
+// carry it directly. A ref'd `other` entry's own `type` describes the
+// schedule annotation ("reminder"), not the assignment, so for those the
+// assignment id wins — it doubles as the type key in submission-form.js
+// and submission-templates.js.
+function typeForItem(item, standalone) {
+  if (item.ref && standalone) return standalone.id;
+  return item.type ?? null;
 }
 
 function titleForItem(item, topics, standalone) {

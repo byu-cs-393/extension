@@ -905,6 +905,8 @@ function shortItemLabel(item) {
     case "live-interview": return item.index ? `Live ${item.index}` : "Live";
     case "professional-mock": return "Prof Mock";
     case "final": return "Final";
+    case "connect-with-class": return "Connect";
+    case "instructor-interview": return "Instr Interview";
     default: return item.type ?? "?";
   }
 }

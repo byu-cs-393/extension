@@ -278,6 +278,18 @@ body {
   color: var(--text-primary);
 }
 
+.card-link {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.card-link:hover {
+  text-decoration: underline;
+}
+
 .card-status {
   font-size: 13px;
   color: var(--text-secondary);
