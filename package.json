@@ -9,6 +9,7 @@
     "test:run": "vitest run"
   },
   "devDependencies": {
+    "jsdom": "^30.0.1",
     "vitest": "^2.1.0"
   }
 }
