@@ -17,6 +17,9 @@ import {
   activeMsByProblem,
   activeMsInWindow,
   formatDuration,
+  resolveProblemTitle,
+  titleToSlug,
+  slugToTitle,
   MAX_ACTIVE_GAP_MS,
   MIN_SAMPLES_FOR_CADENCE,
 } from "../src/keystroke-analysis.js";
@@ -453,5 +456,62 @@ describe("formatDuration", () => {
     expect(formatDuration(8 * 60_000)).toBe("8m");
     expect(formatDuration(72 * 60_000)).toBe("1h 12m");
     expect(formatDuration(120 * 60_000)).toBe("2h 0m");
+  });
+});
+
+describe("problem titles", () => {
+  it("keeps a stored title that matches its slug", () => {
+    expect(
+      resolveProblemTitle({ problemSlug: "two-sum", problemTitle: "Two Sum" }),
+    ).toBe("Two Sum");
+  });
+
+  it("preserves LeetCode's own casing when the title round-trips", () => {
+    // "of" stays lowercase; slugToTitle alone would give "Of".
+    expect(
+      resolveProblemTitle({
+        problemSlug: "median-of-two-sorted-arrays",
+        problemTitle: "Median of Two Sorted Arrays",
+      }),
+    ).toBe("Median of Two Sorted Arrays");
+    expect(
+      resolveProblemTitle({ problemSlug: "3sum", problemTitle: "3Sum" }),
+    ).toBe("3Sum");
+  });
+
+  it("rebuilds from the slug when the stored title names another problem", () => {
+    // The SPA-navigation bug: document.title still said "Two Sum" while
+    // the URL had already moved to add-two-numbers.
+    expect(
+      resolveProblemTitle({
+        problemSlug: "add-two-numbers",
+        problemTitle: "Two Sum",
+      }),
+    ).toBe("Add Two Numbers");
+  });
+
+  it("rebuilds from the slug when there's no stored title at all", () => {
+    expect(
+      resolveProblemTitle({ problemSlug: "longest-palindromic-substring" }),
+    ).toBe("Longest Palindromic Substring");
+  });
+
+  it("falls back to the stored title when there's no slug", () => {
+    expect(resolveProblemTitle({ problemTitle: "Two Sum" })).toBe("Two Sum");
+    expect(resolveProblemTitle({})).toBe("(unknown problem)");
+    expect(resolveProblemTitle(null)).toBe("(unknown problem)");
+  });
+
+  it("round-trips slug ↔ title for ordinary slugs", () => {
+    for (const slug of ["two-sum", "valid-parentheses", "lru-cache"]) {
+      expect(titleToSlug(slugToTitle(slug))).toBe(slug);
+    }
+  });
+
+  it("normalizes punctuation and stray separators", () => {
+    expect(titleToSlug("Pow(x, n)")).toBe("pow-x-n");
+    expect(titleToSlug("  Spaced  Out  ")).toBe("spaced-out");
+    expect(slugToTitle("")).toBe("");
+    expect(slugToTitle("--odd--slug--")).toBe("Odd Slug");
   });
 });

@@ -23,6 +23,7 @@ import { fetchCollection as firestoreFetchCollection } from "./firestore.js";
 import {
   summarizeSession,
   suspicionSignals,
+  resolveProblemTitle,
   totalActiveMs,
   activeMsByProblem,
   formatDuration,
@@ -186,7 +187,9 @@ function renderSessionRow(netID, session, deps) {
 
   const title = document.createElement("span");
   title.className = "ks-session-title";
-  title.textContent = session.problemTitle || session.problemSlug || "(unknown problem)";
+  // Repaired at read time — see resolveProblemTitle. Sessions captured
+  // before the SPA-title fix can carry the previous problem's name.
+  title.textContent = resolveProblemTitle(session);
 
   const meta = document.createElement("span");
   meta.className = "ks-session-meta";

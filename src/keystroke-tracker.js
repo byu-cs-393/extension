@@ -105,9 +105,29 @@ function slugToTitle(slug) {
     .join(" ");
 }
 
+// Slugified form of a display title, for checking that document.title
+// actually belongs to the problem we think we're on.
+function titleToSlug(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// LeetCode is a single-page app: history.pushState fires (and we start a
+// new session) BEFORE document.title catches up, so a naive read here
+// returns the PREVIOUS problem's title. Navigating two-sum →
+// add-two-numbers used to label the second session "Two Sum".
+//
+// So the DOM title is only trusted when it slugifies back to the slug in
+// the URL — which is derived from location.href and can't be stale. When
+// it doesn't match (mid-navigation, or an odd title like "Pow(x, n)" that
+// doesn't round-trip), fall back to the slug. A slightly less pretty
+// title beats confidently naming the wrong problem.
 function getProblemTitle(slug) {
   const stripped = document.title.replace(/\s*[-–]\s*LeetCode\s*$/i, "").trim();
-  return stripped || slugToTitle(slug);
+  if (stripped && titleToSlug(stripped) === slug) return stripped;
+  return slugToTitle(slug);
 }
 
 // ---- Session state -----------------------------------------------------
@@ -128,7 +148,12 @@ function newSession(slug) {
   session = {
     sessionId,
     slug,
+    // Best effort now; retried at metadata-write time if the DOM title
+    // hadn't caught up to this problem yet. See resolveSessionTitle.
     problemTitle: getProblemTitle(slug),
+    titleVerified: document.title !== "" && titleToSlug(
+      document.title.replace(/\s*[-–]\s*LeetCode\s*$/i, "").trim(),
+    ) === slug,
     startedAt,
     chunkIndex: 0,
     deltaCount: 0,
@@ -140,6 +165,19 @@ function newSession(slug) {
   return session;
 }
 
+// Metadata is written on the first flush, up to FLUSH_INTERVAL_MS after
+// the session began — by which point a title that was mid-navigation at
+// session start has usually settled. Only re-read if we didn't already
+// get a verified one, so navigating AWAY (document.title is the next
+// problem, session.slug is this one) can't downgrade a good title.
+function resolveSessionTitle() {
+  if (session.titleVerified) return session.problemTitle;
+  const retried = getProblemTitle(session.slug);
+  session.problemTitle = retried;
+  session.titleVerified = titleToSlug(retried) === session.slug;
+  return retried;
+}
+
 async function ensureSessionMetadata() {
   if (!session || session.metadataWritten) return;
   const path = `students/${netID}/keystrokeSessions/${session.sessionId}`;
@@ -148,7 +186,7 @@ async function ensureSessionMetadata() {
       sessionId: session.sessionId,
       netID,
       problemSlug: session.slug,
-      problemTitle: session.problemTitle,
+      problemTitle: resolveSessionTitle(),
       startedAt: session.startedAt,
       lastActivityAt: session.lastActivityAt,
       deltaCount: 0,

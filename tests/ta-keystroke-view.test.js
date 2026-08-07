@@ -119,7 +119,10 @@ describe("session list", () => {
     renderKeystrokeSection(
       container,
       "jack684",
-      [session(), session({ sessionId: "lru-2", problemTitle: "LRU Cache" })],
+      [
+        session(),
+        session({ sessionId: "lru-2", problemSlug: "lru-cache", problemTitle: "LRU Cache" }),
+      ],
       deps,
     );
     expect($$(".ks-session")).toHaveLength(2);
@@ -147,7 +150,7 @@ describe("session list", () => {
     expect($(".ks-session-meta").textContent).toMatch(/61 edits/);
   });
 
-  it("falls back to the slug, then a placeholder, for a missing title", () => {
+  it("builds a title from the slug when none was stored", () => {
     const { deps } = fakeFirestore([]);
     renderKeystrokeSection(
       container,
@@ -159,9 +162,23 @@ describe("session list", () => {
       deps,
     );
     expect($$(".ks-session-title").map((e) => e.textContent)).toEqual([
-      "two-sum",
+      "Two Sum",
       "(unknown problem)",
     ]);
+  });
+
+  it("repairs a stored title that names a different problem", () => {
+    // Sessions captured before the SPA-title fix carry the PREVIOUS
+    // problem's name; the slug is from the URL and is reliable. Existing
+    // rows in Firestore display correctly without a migration.
+    const { deps } = fakeFirestore([]);
+    renderKeystrokeSection(
+      container,
+      "jack684",
+      [session({ problemSlug: "add-two-numbers", problemTitle: "Two Sum" })],
+      deps,
+    );
+    expect($(".ks-session-title").textContent).toBe("Add Two Numbers");
   });
 
   it("shows a totals placeholder until analysis runs", () => {

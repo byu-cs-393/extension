@@ -241,7 +241,7 @@ export function summarizeSession(session, chunks, opts = {}) {
     sessionId: session?.sessionId ?? null,
     netID: session?.netID ?? null,
     problemSlug: session?.problemSlug ?? null,
-    problemTitle: session?.problemTitle ?? null,
+    problemTitle: resolveProblemTitle(session),
     startedAt: session?.startedAt ?? null,
     endedAt: session?.endedAt ?? session?.lastActivityAt ?? null,
     endReason: session?.endReason ?? null,
@@ -346,6 +346,43 @@ export function suspicionSignals(summary) {
 function truncate(text, max) {
   const str = String(text ?? "");
   return str.length <= max ? str : `${str.slice(0, max)}…`;
+}
+
+// ---- Problem titles ----------------------------------------------------
+//
+// The slug comes from location.href and is always right. The stored
+// problemTitle came from document.title, which on a single-page app can
+// lag a navigation — sessions captured before that was fixed in
+// keystroke-tracker.js may carry the PREVIOUS problem's name. So the
+// stored title is only used when it slugifies back to the stored slug;
+// otherwise it's rebuilt from the slug. That repairs historical rows at
+// read time, with no migration.
+//
+// keystroke-tracker.js has its own inline copy of this rule: MV3 content
+// scripts can't import modules, the same reason it inlines its Firestore
+// helpers. Keep the two in step.
+
+export function titleToSlug(title) {
+  return String(title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function slugToTitle(slug) {
+  return String(slug ?? "")
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function resolveProblemTitle(session) {
+  const slug = session?.problemSlug;
+  const stored = session?.problemTitle;
+  if (!slug) return stored || "(unknown problem)";
+  if (stored && titleToSlug(stored) === slug) return stored;
+  return slugToTitle(slug);
 }
 
 // ---- Cross-session aggregates ------------------------------------------
