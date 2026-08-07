@@ -340,3 +340,197 @@
   color: var(--accent, #2563eb);
   text-decoration: underline;
 }
+
+/* ---- LeetCode sessions (keystroke capture) ----------------------------
+
+   Styled deliberately flat: signals use the warning tone, never the
+   error tone, because nothing in this view is a finding. The
+   counter-reading line is part of every signal card by design. */
+
+.ks-totals {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ks-totals-headline {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.ks-totals-note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.ks-problem-table {
+  margin-top: 12px;
+  border-top: 1px solid var(--divider);
+  padding-top: 8px;
+}
+
+.ks-problem-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.ks-problem-name {
+  color: var(--text-primary);
+}
+
+.ks-problem-meta {
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.ks-analyze-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.ks-analyze-btn:hover:not([disabled]) {
+  background: var(--hover-bg);
+}
+
+.ks-analyze-btn[disabled] {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.ks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ks-session {
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--card-bg);
+  overflow: hidden;
+}
+
+.ks-session-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ks-session-head:hover {
+  background: var(--hover-bg);
+}
+
+.ks-session-chevron {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.ks-session-title {
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.ks-session-meta {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ks-session-detail {
+  padding: 4px 14px 14px 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.ks-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0;
+}
+
+.ks-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ks-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}
+
+.ks-stat-value {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.ks-no-signals {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 8px 0 0 0;
+}
+
+.ks-signals-heading {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  margin: 12px 0 8px 0;
+}
+
+.ks-signal {
+  border-left: 3px solid var(--warning, #f59e0b);
+  background: var(--bg);
+  border-radius: 0 6px 6px 0;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.ks-signal-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ks-signal-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.ks-signal-innocent {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-style: italic;
+}

@@ -34,15 +34,36 @@ export async function fetchDoc(path) {
 }
 
 // Generic LIST for any Firestore collection or subcollection.
+//
+// Follows nextPageToken to completion. Firestore's REST listDocuments
+// defaults to 20 documents per page and caps at 300, so without this a
+// collection larger than 20 came back silently truncated — fine for a
+// 15-doc weekProgress collection, wrong for a class roster or a
+// keystroke session's chunks, where partial data reads as complete.
 export async function fetchCollection(path) {
-  const url = `${FIRESTORE_BASE}/${path}?key=${firebaseConfig.apiKey}`;
-  const response = await authedFetch(url);
-  if (response.status === 404) return [];
-  if (!response.ok) {
-    throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
-  }
-  const data = await response.json();
-  return (data.documents ?? []).map((doc) => parseFirestoreFields(doc.fields));
+  const documents = [];
+  let pageToken = null;
+
+  do {
+    const params = new URLSearchParams({
+      key: firebaseConfig.apiKey,
+      pageSize: "300",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await authedFetch(`${FIRESTORE_BASE}/${path}?${params}`);
+    if (response.status === 404) return documents;
+    if (!response.ok) {
+      throw new Error(`Firestore GET ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    for (const doc of data.documents ?? []) {
+      documents.push(parseFirestoreFields(doc.fields));
+    }
+    pageToken = data.nextPageToken ?? null;
+  } while (pageToken);
+
+  return documents;
 }
 
 // Generic DELETE for any Firestore doc. Treats 404 as success (already
