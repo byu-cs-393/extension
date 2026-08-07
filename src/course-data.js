@@ -200,7 +200,7 @@ export function studyAssignmentIdForWeek(weekNum) {
 // 2026 to keep this synchronous; if the term ever changes, update
 // SEMESTER_YEAR here.
 
-const SEMESTER_YEAR = 2025;
+const SEMESTER_YEAR = 2026;
 
 const MONTHS = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
