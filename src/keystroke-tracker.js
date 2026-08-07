@@ -287,6 +287,10 @@ window.addEventListener("message", (event) => {
       kind: "delta",
       t: data.t,
       wallMs: Date.now(),
+      // Which Monaco instance this edit belongs to. LeetCode runs more
+      // than one; `offset` only means something relative to its own
+      // editor's document.
+      editorId: data.editorId ?? null,
       offset: data.offset,
       length: data.length,
       text: data.text,
@@ -296,8 +300,10 @@ window.addEventListener("message", (event) => {
       kind: "snapshot",
       t: data.t,
       wallMs: Date.now(),
+      editorId: data.editorId ?? null,
       text: data.text,
       language: data.language,
+      lineCount: data.lineCount ?? null,
     });
   } else if (data.type === "editor-hooked" || data.type === "injector-loaded") {
     console.log(`[CS 393 Buddy] injector: ${data.type}`);

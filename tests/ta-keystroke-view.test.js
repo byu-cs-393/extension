@@ -450,3 +450,24 @@ describe("cross-student cache hygiene", () => {
     );
   });
 });
+
+describe("mixed-editor caveat", () => {
+  it("warns when a session predates per-editor capture", async () => {
+    const { deps } = fakeFirestore(humanEvents()); // no editorId on any event
+    renderKeystrokeSection(container, "jack684", [session()], deps);
+    await click($(".ks-session-head"));
+
+    expect($(".ks-caveat")).not.toBe(null);
+    expect($(".ks-caveat").textContent).toMatch(/testcase pane/);
+    expect($(".ks-caveat").textContent).toMatch(/approximate/);
+  });
+
+  it("shows no caveat once edits carry an editor id", async () => {
+    const withEditor = humanEvents().map((e) => ({ ...e, editorId: "sol" }));
+    const { deps } = fakeFirestore(withEditor);
+    renderKeystrokeSection(container, "jack684", [session()], deps);
+    await click($(".ks-session-head"));
+
+    expect($(".ks-caveat")).toBe(null);
+  });
+});

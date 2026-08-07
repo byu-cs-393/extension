@@ -18,6 +18,9 @@ import {
   activeMsInWindow,
   formatDuration,
   resolveProblemTitle,
+  editorIdsIn,
+  primaryEditorId,
+  eventsForEditor,
   titleToSlug,
   slugToTitle,
   MAX_ACTIVE_GAP_MS,
@@ -513,5 +516,98 @@ describe("problem titles", () => {
     expect(titleToSlug("  Spaced  Out  ")).toBe("spaced-out");
     expect(slugToTitle("")).toBe("");
     expect(slugToTitle("--odd--slug--")).toBe("Odd Slug");
+  });
+});
+
+describe("multiple Monaco editors", () => {
+  // LeetCode mounts the solution buffer plus a testcase pane. `offset`
+  // is relative to whichever document the edit landed in, so the streams
+  // must not be merged.
+  const snap = (at, editorId, language, text = "class Solution:") => ({
+    kind: "snapshot", t: at, wallMs: T0 + at, editorId, language, text,
+  });
+  const typeIn = (at, editorId, text = "x") => ({
+    kind: "delta", t: at, wallMs: T0 + at, editorId, offset: 0, length: 0, text,
+  });
+
+  it("lists the distinct editor ids", () => {
+    const events = [typeIn(0, "e1"), typeIn(100, "e2"), typeIn(200, "e1")];
+    expect(editorIdsIn(events).sort()).toEqual(["e1", "e2"]);
+  });
+
+  it("returns null when the capture predates editor ids", () => {
+    expect(primaryEditorId([type(0), type(100)])).toBe(null);
+  });
+
+  it("prefers the editor whose snapshot declares a code language", () => {
+    const events = [
+      snap(0, "e1", "plaintext", "[1,2,3]"),
+      snap(10, "e2", "python"),
+      // The testcase pane has MORE edits here — language must win.
+      ...Array.from({ length: 20 }, (_, i) => typeIn(100 + i, "e1")),
+      typeIn(500, "e2"),
+    ];
+    expect(primaryEditorId(events)).toBe("e2");
+  });
+
+  it("falls back to the most-edited editor when no snapshot says", () => {
+    const events = [
+      typeIn(0, "e1"),
+      ...Array.from({ length: 10 }, (_, i) => typeIn(100 + i, "e2")),
+    ];
+    expect(primaryEditorId(events)).toBe("e2");
+  });
+
+  it("keeps session-level events when narrowing to one editor", () => {
+    // Pastes and tab focus aren't tied to an editor and still bound the
+    // timeline, so active time stays correct after narrowing.
+    const events = [
+      typeIn(0, "e1"),
+      paste(100, 500),
+      typeIn(200, "e2"),
+      blur(300),
+      focus(400),
+    ];
+    const narrowed = eventsForEditor(events, "e1");
+    expect(narrowed.map((e) => e.kind)).toEqual([
+      "delta", "paste", "tab_blur", "tab_focus",
+    ]);
+  });
+
+  it("returns everything when there's no editor to narrow to", () => {
+    const events = [type(0), paste(100, 500)];
+    expect(eventsForEditor(events, null)).toHaveLength(2);
+  });
+
+  it("measures typing on the solution editor only", () => {
+    // 3 chars into the solution, 40 into the testcase pane. Merging them
+    // would more than double insertedChars and skew the deletion ratio.
+    const chunks = [{ events: [
+      snap(0, "sol", "python"),
+      snap(5, "tests", "plaintext", "[]"),
+      typeIn(100, "sol", "abc"),
+      ...Array.from({ length: 40 }, (_, i) => typeIn(200 + i, "tests")),
+    ]}];
+    const summary = summarizeSession({ sessionId: "s" }, chunks);
+    expect(summary.editorId).toBe("sol");
+    expect(summary.editorCount).toBe(2);
+    expect(summary.typing.insertedChars).toBe(3);
+  });
+
+  it("flags a pre-editorId session so mixed numbers aren't shown as clean", () => {
+    const legacy = summarizeSession({ sessionId: "s" }, [{ events: [type(0), type(100)] }]);
+    expect(legacy.editorIdsPresent).toBe(false);
+    expect(legacy.editorId).toBe(null);
+
+    const current = summarizeSession({ sessionId: "s" }, [{ events: [typeIn(0, "e1")] }]);
+    expect(current.editorIdsPresent).toBe(true);
+  });
+
+  it("still measures every delta for a pre-editorId session", () => {
+    // Degrades to the old behaviour rather than reporting zero.
+    const summary = summarizeSession({ sessionId: "s" }, [
+      { events: [type(0, "abc"), type(100, "de")] },
+    ]);
+    expect(summary.typing.insertedChars).toBe(5);
   });
 });

@@ -72,6 +72,78 @@ export function eventsOfKind(events, kind) {
   return (events ?? []).filter((e) => e?.kind === kind);
 }
 
+// ---- Editors -----------------------------------------------------------
+//
+// LeetCode mounts more than one Monaco editor: the solution buffer plus
+// at least the custom-testcase pane. Deltas from each carry an editorId,
+// because `offset` is only meaningful against that editor's own
+// document. Anything that reads offsets (replay) or measures how the
+// student typed (typingStats) has to work on ONE editor's stream — mixing
+// them silently corrupts both.
+//
+// Sessions captured before editorId existed have none. Those degrade to
+// "treat every delta as one stream", which is what the old code did; the
+// summary flags it via `editorIdsPresent` so a caller can say so rather
+// than quietly presenting mixed-editor numbers as clean ones.
+
+// Model languages that mean "not the solution buffer". A denylist rather
+// than an allowlist of programming languages, so a language nobody
+// thought of doesn't get mistaken for the testcase pane.
+const NON_CODE_LANGUAGES = new Set(["plaintext", "text", "json", "markdown"]);
+
+export function editorIdsIn(events) {
+  const ids = new Set();
+  for (const event of events ?? []) {
+    if (event?.editorId) ids.add(event.editorId);
+  }
+  return [...ids];
+}
+
+// The editor holding the student's solution.
+//
+// Prefers editors whose snapshot declares a code language, then falls
+// back to whichever took the most edits — you type far more into the
+// solution than into a testcase pane. Returns null when the capture has
+// no editor ids at all (pre-editorId sessions).
+export function primaryEditorId(events) {
+  const ids = editorIdsIn(events);
+  if (ids.length === 0) return null;
+  if (ids.length === 1) return ids[0];
+
+  const codeIds = new Set();
+  for (const snap of eventsOfKind(events, "snapshot")) {
+    const language = snap.language ? String(snap.language).toLowerCase() : null;
+    if (snap.editorId && language && !NON_CODE_LANGUAGES.has(language)) {
+      codeIds.add(snap.editorId);
+    }
+  }
+
+  const candidates = ids.filter((id) => codeIds.size === 0 || codeIds.has(id));
+  const deltaCounts = new Map(candidates.map((id) => [id, 0]));
+  for (const delta of eventsOfKind(events, "delta")) {
+    if (deltaCounts.has(delta.editorId)) {
+      deltaCounts.set(delta.editorId, deltaCounts.get(delta.editorId) + 1);
+    }
+  }
+
+  let best = candidates[0] ?? null;
+  for (const [id, count] of deltaCounts) {
+    if (count > (deltaCounts.get(best) ?? -1)) best = id;
+  }
+  return best;
+}
+
+// Narrows an event list to one editor's edits, keeping the session-level
+// events (paste, copy, tab focus) that aren't tied to any editor — those
+// still bound the timeline and still matter to active time.
+export function eventsForEditor(events, editorId) {
+  if (!editorId) return events ?? [];
+  return (events ?? []).filter((event) => {
+    if (event?.kind !== "delta" && event?.kind !== "snapshot") return true;
+    return event.editorId === editorId;
+  });
+}
+
 // ---- Time on task ------------------------------------------------------
 
 // Spans where the tab was hidden, as [startMs, endMs) pairs.
@@ -232,7 +304,13 @@ export function copyEvents(events, { minLength = NOTABLE_PASTE_CHARS } = {}) {
 // Everything a TA view needs for one session, in one object.
 export function summarizeSession(session, chunks, opts = {}) {
   const events = flattenChunks(chunks);
-  const typing = typingStats(events);
+  // Typing shape is measured on the solution editor alone. Edits to the
+  // testcase pane would otherwise inflate the character counts and skew
+  // both the deletion ratio and the cadence — the two inputs to the
+  // "typed it straight through" signals.
+  const editorIds = editorIdsIn(events);
+  const editorId = primaryEditorId(events);
+  const typing = typingStats(eventsForEditor(events, editorId));
   const pastes = pasteEvents(events, opts);
   const copies = copyEvents(events, opts);
   const active = activeMs(events, opts);
@@ -256,6 +334,13 @@ export function summarizeSession(session, chunks, opts = {}) {
     hiddenMs: hiddenSpans(events, events[events.length - 1]?.wallMs ?? null)
       .reduce((sum, [start, end]) => sum + Math.max(0, end - start), 0),
     eventCount: events.length,
+    // Which editor the typing numbers describe, and whether the capture
+    // distinguished editors at all. False means a pre-editorId session:
+    // the numbers below mix every Monaco instance on the page and should
+    // be presented as approximate.
+    editorId,
+    editorCount: editorIds.length,
+    editorIdsPresent: editorIds.length > 0,
     typing,
     pastes,
     copies,

@@ -279,6 +279,19 @@ function renderSessionDetail(container, summary) {
   }
   container.appendChild(stats);
 
+  // LeetCode runs two Monaco editors. Sessions recorded before the
+  // capture told them apart have their solution edits mixed with
+  // testcase-pane edits, which nudges every number above — say so rather
+  // than present mixed data as clean.
+  if (!summary.editorIdsPresent) {
+    const caveat = document.createElement("p");
+    caveat.className = "ks-caveat";
+    caveat.textContent =
+      "Recorded before per-editor capture — these numbers combine the " +
+      "solution editor with the testcase pane, so treat them as approximate.";
+    container.appendChild(caveat);
+  }
+
   const signals = suspicionSignals(summary);
   if (signals.length === 0) {
     const none = document.createElement("p");
