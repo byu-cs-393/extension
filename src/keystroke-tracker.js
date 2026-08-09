@@ -23,6 +23,21 @@
 // MV3 content scripts can't use module imports, so firebase config and
 // helpers are inlined (same pattern as leetcode-tracker.js).
 
+// NOTE: content scripts injected into the same page share ONE
+// isolated-world global scope, and that scope survives an extension
+// reload — so a re-injected copy of this file meets the previous copy's
+// top-level bindings still sitting there. Either way the result is
+// "Identifier 'firebaseConfig' has already been declared", and the file
+// dies before running a line.
+//
+// So the whole file lives inside this IIFE: nothing reaches the shared
+// scope, and re-injection is harmless. Cross-script communication goes
+// through window events (see "locationchange"), which still work.
+//
+// The body is intentionally left un-indented so the wrapper doesn't
+// rewrite every line of the file.
+(() => {
+
 const firebaseConfig = {
   apiKey: "AIzaSyC2RxnVrQii0rT-Tm3JZmURmHzico-VqDg",
   projectId: "cs393-496021",
@@ -572,4 +587,5 @@ function markBadgeStopped() {
   if (slug) newSession(slug);
 
   flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL_MS);
+})();
 })();

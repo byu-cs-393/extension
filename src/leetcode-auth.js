@@ -5,6 +5,22 @@
 // the same extension share an isolated world per tab — and the
 // second-loaded file would silently fail with a SyntaxError, taking
 // open_problem and submit_pass logging down with it.
+
+// NOTE: content scripts injected into the same page share ONE
+// isolated-world global scope, and that scope survives an extension
+// reload — so a re-injected copy of this file meets the previous copy's
+// top-level bindings still sitting there. Either way the result is
+// "Identifier 'firebaseConfig' has already been declared", and the file
+// dies before running a line.
+//
+// So the whole file lives inside this IIFE: nothing reaches the shared
+// scope, and re-injection is harmless. Cross-script communication goes
+// through window events (see "locationchange"), which still work.
+//
+// The body is intentionally left un-indented so the wrapper doesn't
+// rewrite every line of the file.
+(() => {
+
 (() => {
 "use strict";
 
@@ -300,4 +316,5 @@ async function runBackstop(username) {
   }
 })();
 
+})();
 })();
