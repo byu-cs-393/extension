@@ -163,6 +163,21 @@ describe("buildReplayTimeline", () => {
     expect(timeline.warnings.join(" ")).toMatch(/didn't line up|clamped/i);
   });
 
+  it("says which edit the drift started at, not just how many", () => {
+    // A TA deciding how much of a replay to trust needs the boundary:
+    // everything before the first bad offset is exact.
+    const events = [
+      snapshot(0, "abcdef"),
+      ...typeOut(100, 6, "gh"),
+      delta(400, 900, 0, "!"),
+      delta(500, 901, 0, "?"),
+    ];
+    const warning = buildReplayTimeline(events).warnings.join(" ");
+    expect(warning).toMatch(/2 edits/);
+    expect(warning).toMatch(/starting at edit 3 of 4/);
+    expect(warning).toMatch(/before that point is exact/i);
+  });
+
   it("has no warnings for a clean session", () => {
     const events = [snapshot(0, "abc"), ...typeOut(100, 3, "def")];
     expect(buildReplayTimeline(events).warnings).toEqual([]);

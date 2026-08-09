@@ -197,20 +197,29 @@ export function buildReplayTimeline(events, { editorId = null } = {}) {
   const keyframes = [];
   let text = baseline;
   let desyncCount = 0;
+  let firstDesyncStep = null;
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
     if (step.kind === "reset") {
       text = step.text;
     } else {
-      if (isDesynced(text, step)) desyncCount += 1;
+      if (isDesynced(text, step)) {
+        desyncCount += 1;
+        if (firstDesyncStep === null) firstDesyncStep = i;
+      }
       text = applyDelta(text, step);
     }
     if ((i + 1) % KEYFRAME_INTERVAL === 0) keyframes.push({ index: i, text });
   }
   if (desyncCount > 0) {
+    // Say WHERE it started, not just how many. Everything before the
+    // first bad offset is exact; only the tail is suspect, and a TA
+    // deciding how much of a replay to trust needs that boundary.
     warnings.push(
-      `${desyncCount} edit${desyncCount === 1 ? "" : "s"} didn't line up with the ` +
-        "document and were clamped — the replay may drift from what was typed.",
+      `${desyncCount} edit${desyncCount === 1 ? "" : "s"} didn't line up with ` +
+        `the document and were clamped, starting at edit ${firstDesyncStep + 1} ` +
+        `of ${steps.length}. Everything before that point is exact; after it ` +
+        "the replay may drift from what was typed.",
     );
   }
 

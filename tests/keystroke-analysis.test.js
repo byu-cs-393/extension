@@ -79,8 +79,7 @@ describe("flattenChunks", () => {
     expect(flattenChunks({})).toEqual([]);
   });
 
-  it("merges chunks and orders by wallMs, not by chunk order", () => {
-    // Firestore listing order isn't guaranteed to match chunkIndex.
+  it("orders by chunkIndex, not by Firestore listing order", () => {
     const chunks = [
       { chunkIndex: 1, events: [type(2000), type(3000)] },
       { chunkIndex: 0, events: [type(0), type(1000)] },
@@ -88,6 +87,47 @@ describe("flattenChunks", () => {
     expect(flattenChunks(chunks).map((e) => e.wallMs - T0)).toEqual([
       0, 1000, 2000, 3000,
     ]);
+  });
+
+  it("preserves capture order within a millisecond", () => {
+    // One Monaco change event — auto-indent, bracket completion, a paste
+    // — arrives as several deltas stamped with the same Date.now().
+    // Monaco emits them in reverse offset order so they apply one after
+    // another; re-sorting would break that and produce clamped offsets.
+    const chunks = [
+      {
+        chunkIndex: 0,
+        events: [
+          { ...type(500, "b"), offset: 10 },
+          { ...type(500, "a"), offset: 4 },
+        ],
+      },
+    ];
+    expect(flattenChunks(chunks).map((e) => e.offset)).toEqual([10, 4]);
+  });
+
+  it("does not interleave same-millisecond events across chunks", () => {
+    // Firestore handed chunk 1 back first. A wallMs sort is stable, so it
+    // would keep chunk 1's events ahead of chunk 0's — reversing them.
+    const chunks = [
+      { chunkIndex: 1, events: [{ ...type(500, "c"), offset: 3 }] },
+      {
+        chunkIndex: 0,
+        events: [
+          { ...type(500, "a"), offset: 1 },
+          { ...type(500, "b"), offset: 2 },
+        ],
+      },
+    ];
+    expect(flattenChunks(chunks).map((e) => e.offset)).toEqual([1, 2, 3]);
+  });
+
+  it("falls back to a wallMs sort when a chunk has no index", () => {
+    const chunks = [
+      { events: [type(3000)] },
+      { chunkIndex: 0, events: [type(1000)] },
+    ];
+    expect(flattenChunks(chunks).map((e) => e.wallMs - T0)).toEqual([1000, 3000]);
   });
 
   it("drops events with no usable wallMs rather than sorting them to the epoch", () => {

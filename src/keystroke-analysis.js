@@ -59,13 +59,44 @@ export const MIN_SAMPLES_FOR_CADENCE = 20;
 // without a usable wallMs are dropped rather than sorted to the epoch.
 export function flattenChunks(chunks) {
   if (!Array.isArray(chunks)) return [];
+
+  // Order by chunkIndex, then keep each chunk's events in the order they
+  // were captured. Do NOT re-sort by wallMs.
+  //
+  // wallMs is Date.now() stamped when the content script receives the
+  // message, so an entire Monaco change event — auto-closing a bracket,
+  // auto-indenting a new line, applying a paste — arrives as several
+  // deltas sharing one millisecond. Monaco emits those in reverse offset
+  // order specifically so they can be applied one after another without
+  // invalidating each other, which makes their relative order part of
+  // the data. A wallMs sort can't see that order and, because chunks come
+  // back from Firestore in arbitrary order, could interleave two chunks'
+  // same-millisecond events and silently reverse it. The symptom is
+  // offsets that no longer match the document: clamped edits and
+  // characters missing from the replay.
+  //
+  // Capture order is chronological by construction, so chunkIndex plus
+  // array position IS the correct order. wallMs is only a fallback for
+  // chunks written before chunkIndex existed.
+  const ordered = [...chunks].sort((a, b) => {
+    const ai = Number.isFinite(a?.chunkIndex) ? a.chunkIndex : Infinity;
+    const bi = Number.isFinite(b?.chunkIndex) ? b.chunkIndex : Infinity;
+    return ai - bi;
+  });
+
   const events = [];
-  for (const chunk of chunks) {
+  for (const chunk of ordered) {
     for (const event of chunk?.events ?? []) {
       if (event && Number.isFinite(event.wallMs)) events.push(event);
     }
   }
-  return events.sort((a, b) => a.wallMs - b.wallMs);
+
+  // Chunks with no index at all can't be ordered that way; fall back to
+  // a stable wallMs sort, which at least keeps within-chunk order.
+  if (ordered.some((chunk) => !Number.isFinite(chunk?.chunkIndex))) {
+    return events.sort((a, b) => a.wallMs - b.wallMs);
+  }
+  return events;
 }
 
 export function eventsOfKind(events, kind) {
