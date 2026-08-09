@@ -74,16 +74,6 @@ export function canReplay(events) {
   return { ok: true, reason: null };
 }
 
-// Builds the replay model for one editor's stream.
-//
-// Returns { editorId, language, baseline, steps, keyframes, startMs,
-//           endMs, durationMs, warnings }.
-//
-// `steps` are in wall-clock order. A step is either a delta or a "reset"
-// — a second snapshot for the same editor, which LeetCode emits when it
-// rebuilds the editor on a language change. A reset replaces the whole
-// document rather than editing it; treating it as a baseline instead
-// would silently drop everything typed before the switch.
 // Drops any snapshot that's immediately followed by another snapshot
 // with no edit in between — the earlier one never described a document
 // the student did anything to.
@@ -109,15 +99,60 @@ function dropSupersededSnapshots(events) {
   return kept;
 }
 
+// How long after a speculative baseline a real one can still displace it.
+export const SPECULATIVE_BASELINE_WINDOW_MS = 5000;
+
+// A "requested" snapshot is one the content script asked for the instant
+// the URL changed — before LeetCode had necessarily swapped Monaco's
+// model, so it may still hold the PREVIOUS problem's code. A "hook",
+// "model-change" or "flush" snapshot is taken because the document
+// actually changed, so it describes something real.
+//
+// If a session opens on a speculative baseline and a real one arrives
+// shortly after, the real one wins and everything before it is dropped —
+// including any deltas in between, which were edits to a document that
+// was on its way out. Keeping them would apply the old problem's offsets
+// to the new problem's text, which is what left replays sitting on the
+// wrong problem showing no edits.
+//
+// Bounded by a time window so this only ever fires at session start. A
+// mid-session reset ten minutes in is a genuine reset, not this race.
+function dropStaleOpeningBaseline(events) {
+  const first = events[0];
+  if (!first || first.kind !== "snapshot" || first.reason !== "requested") {
+    return events;
+  }
+  for (let i = 1; i < events.length; i += 1) {
+    const event = events[i];
+    if (event.kind !== "snapshot") continue;
+    if (!event.reason || event.reason === "requested") continue;
+    if (event.wallMs - first.wallMs > SPECULATIVE_BASELINE_WINDOW_MS) break;
+    return events.slice(i);
+  }
+  return events;
+}
+
+// Builds the replay model for one editor's stream.
+//
+// Returns { editorId, language, baseline, steps, keyframes, startMs,
+//           endMs, durationMs, warnings }.
+//
+// `steps` are in wall-clock order. A step is either a delta or a "reset"
+// — a second snapshot for the same editor, which LeetCode emits when it
+// rebuilds the editor on a language change. A reset replaces the whole
+// document rather than editing it; treating it as a baseline instead
+// would silently drop everything typed before the switch.
 export function buildReplayTimeline(events, { editorId = null } = {}) {
   const targetEditor = editorId ?? primaryEditorId(events);
   const warnings = [];
 
-  const relevant = dropSupersededSnapshots(
-    (events ?? []).filter(
-      (event) =>
-        (event?.kind === "delta" || event?.kind === "snapshot") &&
-        (targetEditor === null || event.editorId === targetEditor),
+  const relevant = dropStaleOpeningBaseline(
+    dropSupersededSnapshots(
+      (events ?? []).filter(
+        (event) =>
+          (event?.kind === "delta" || event?.kind === "snapshot") &&
+          (targetEditor === null || event.editorId === targetEditor),
+      ),
     ),
   );
 

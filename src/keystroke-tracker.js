@@ -244,30 +244,30 @@ function requestSnapshots() {
 // session start has usually settled. Only re-read if we didn't already
 // get a verified one, so navigating AWAY (document.title is the next
 // problem, session.slug is this one) can't downgrade a good title.
-function resolveSessionTitle() {
-  if (session.titleVerified) return session.problemTitle;
-  const retried = getProblemTitle(session.slug);
-  session.problemTitle = retried;
-  session.titleVerified = titleToSlug(retried) === session.slug;
+function resolveSessionTitle(target) {
+  if (target.titleVerified) return target.problemTitle;
+  const retried = getProblemTitle(target.slug);
+  target.problemTitle = retried;
+  target.titleVerified = titleToSlug(retried) === target.slug;
   return retried;
 }
 
-async function ensureSessionMetadata() {
-  if (!session || session.metadataWritten) return;
-  const path = `students/${netID}/keystrokeSessions/${session.sessionId}`;
+async function ensureSessionMetadata(target) {
+  if (!target || target.metadataWritten) return;
+  const path = `students/${netID}/keystrokeSessions/${target.sessionId}`;
   try {
     await patchFirestoreDoc(path, {
-      sessionId: session.sessionId,
+      sessionId: target.sessionId,
       netID,
-      problemSlug: session.slug,
-      problemTitle: resolveSessionTitle(),
-      startedAt: session.startedAt,
-      lastActivityAt: session.lastActivityAt,
+      problemSlug: target.slug,
+      problemTitle: resolveSessionTitle(target),
+      startedAt: target.startedAt,
+      lastActivityAt: target.lastActivityAt,
       deltaCount: 0,
       chunkCount: 0,
       userAgent: navigator.userAgent,
     });
-    session.metadataWritten = true;
+    target.metadataWritten = true;
   } catch (error) {
     if (isContextInvalidatedError(error)) {
       handleContextInvalidated();
@@ -277,34 +277,43 @@ async function ensureSessionMetadata() {
   }
 }
 
-async function flushBuffer(endReason) {
+// `target` is bound ONCE, at call time, and every line below uses it
+// instead of the module-level `session`.
+//
+// That distinction is the whole bug this signature fixes: onLocationChange
+// calls flushBuffer("navigate") WITHOUT awaiting it and then immediately
+// reassigns `session` to the next problem. Every line after the first
+// await used to read the module variable — so the outgoing problem's
+// buffered typing was silently dropped, and the rollup stamped the
+// INCOMING session with the outgoing one's endReason and counters.
+async function flushBuffer(endReason, target = session) {
   if (contextInvalidated) return;
   if (!extensionContextAlive()) {
     handleContextInvalidated();
     return;
   }
-  if (!session) return;
-  if (session.buffer.length === 0 && !endReason) return;
+  if (!target) return;
+  if (target.buffer.length === 0 && !endReason) return;
 
-  await ensureSessionMetadata();
+  await ensureSessionMetadata(target);
 
   // Snapshot + clear buffer BEFORE the write so events during the
   // write end up in the next chunk.
-  const events = session.buffer;
-  session.buffer = [];
+  const events = target.buffer;
+  target.buffer = [];
 
   if (events.length > 0) {
     const chunkPath =
-      `students/${netID}/keystrokeSessions/${session.sessionId}` +
-      `/chunks/${String(session.chunkIndex).padStart(6, "0")}`;
+      `students/${netID}/keystrokeSessions/${target.sessionId}` +
+      `/chunks/${String(target.chunkIndex).padStart(6, "0")}`;
     try {
       await patchFirestoreDoc(chunkPath, {
-        chunkIndex: session.chunkIndex,
+        chunkIndex: target.chunkIndex,
         writtenAt: Date.now(),
         events,
       });
-      session.chunkIndex += 1;
-      session.deltaCount += events.length;
+      target.chunkIndex += 1;
+      target.deltaCount += events.length;
     } catch (error) {
       if (isContextInvalidatedError(error)) {
         handleContextInvalidated();
@@ -315,7 +324,7 @@ async function flushBuffer(endReason) {
       // on the next flush. Safe only for transient failures — an
       // invalidated context is handled above, or this would grow without
       // bound behind a badge that still says "recording".
-      session.buffer = events.concat(session.buffer);
+      target.buffer = events.concat(target.buffer);
       return;
     }
   }
@@ -324,12 +333,12 @@ async function flushBuffer(endReason) {
   // session doc's lastActivityAt / counters get stale, but the chunks
   // are still there and authoritative.
   const sessionPath =
-    `students/${netID}/keystrokeSessions/${session.sessionId}`;
+    `students/${netID}/keystrokeSessions/${target.sessionId}`;
   try {
     const patch = {
-      lastActivityAt: session.lastActivityAt,
-      deltaCount: session.deltaCount,
-      chunkCount: session.chunkIndex,
+      lastActivityAt: target.lastActivityAt,
+      deltaCount: target.deltaCount,
+      chunkCount: target.chunkIndex,
     };
     if (endReason) patch.endReason = endReason;
     if (endReason) patch.endedAt = Date.now();
@@ -353,7 +362,9 @@ function pushEvent(event) {
   // Idle timeout: end the current session and start a fresh one if
   // we've been quiet for too long.
   if (Date.now() - session.lastActivityAt > IDLE_TIMEOUT_MS) {
-    flushBuffer("idle");
+    // Same rule as navigation: name the outgoing session, because
+    // newSession() below reassigns `session` before the flush finishes.
+    flushBuffer("idle", session);
     const slug = parseProblemSlug(location.href);
     if (slug) newSession(slug);
     else return;
@@ -361,6 +372,11 @@ function pushEvent(event) {
   session.lastActivityAt = Date.now();
   session.buffer.push(event);
 }
+
+// Current URL as last acted on, shared by the page-world navigation
+// notice and the polling fallback below.
+let lastSeenHref = location.href;
+const LOCATION_POLL_MS = 1000;
 
 // ---- Injector bridge ---------------------------------------------------
 
@@ -398,7 +414,19 @@ window.addEventListener("message", (event) => {
       text: data.text,
       language: data.language,
       lineCount: data.lineCount ?? null,
+      // "hook" | "model-change" | "flush" | "requested". The read side
+      // uses this to distinguish a baseline taken when the document
+      // genuinely changed from one taken speculatively at navigation.
+      reason: data.reason ?? null,
     });
+  } else if (data.type === "navigated") {
+    // Page-world navigation notice. Synchronous with LeetCode's own
+    // pushState, so this beats the location poll and — crucially — beats
+    // Monaco swapping in the new problem's code.
+    if (data.href !== lastSeenHref) {
+      lastSeenHref = data.href;
+      onLocationChange();
+    }
   } else if (
     data.type === "editor-hooked" ||
     data.type === "injector-loaded" ||
@@ -490,8 +518,6 @@ history.pushState = function (...args) {
 // A second of latency is invisible next to a 5s flush interval, and any
 // edits in that window still land in the correct session — onLocationChange
 // flushes the outgoing one before opening the next.
-const LOCATION_POLL_MS = 1000;
-let lastSeenHref = location.href;
 locationTimer = setInterval(() => {
   if (contextInvalidated) return;
   if (location.href === lastSeenHref) return;
@@ -504,7 +530,7 @@ function onLocationChange() {
   // If we drifted off a problem page entirely, end the session.
   if (!slug) {
     if (session) {
-      flushBuffer("navigate");
+      flushBuffer("navigate", session);
       session = null;
     }
     return;
@@ -513,7 +539,7 @@ function onLocationChange() {
   if (session && session.slug === slug) return;
   // Different problem → flush + close current, start fresh.
   if (session) {
-    flushBuffer("navigate");
+    flushBuffer("navigate", session);
     session = null;
   }
   newSession(slug);

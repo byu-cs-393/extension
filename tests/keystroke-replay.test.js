@@ -400,3 +400,72 @@ describe("stale baselines from navigation and code resets", () => {
     expect(timeline.finalText).toBe("class Solution:!");
   });
 });
+
+describe("speculative baselines lose to real ones", () => {
+  // The remaining half of the navigation race: a "requested" snapshot is
+  // taken the instant the URL changes, which can be before LeetCode has
+  // swapped Monaco's model. dropSupersededSnapshots only helps when
+  // nothing lands between the two — this covers when something does.
+  const requested = (at, text) => snapshot(at, text, { reason: "requested" });
+  const real = (at, text, reason = "model-change") =>
+    snapshot(at, text, { reason });
+
+  it("discards a speculative baseline and the edits made against it", () => {
+    const events = [
+      requested(0, "class PreviousProblem:\n    return prev"),
+      // Tail-end typing on the OLD document, still arriving after the
+      // new session opened. Applying these to the new text is what
+      // produced clamped offsets and a frozen-looking replay.
+      delta(50, 22, 0, "X"),
+      real(80, "class Solution:"),
+      ...typeOut(200, 15, "\n    pass"),
+    ];
+    const timeline = buildReplayTimeline(events);
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.finalText).toBe("class Solution:\n    pass");
+    expect(timeline.steps.filter((s) => s.kind === "reset")).toHaveLength(0);
+    expect(timeline.warnings).toEqual([]);
+  });
+
+  it("accepts any non-speculative reason as the real baseline", () => {
+    for (const reason of ["model-change", "flush", "hook"]) {
+      const events = [
+        requested(0, "old"),
+        delta(10, 3, 0, "!"),
+        real(50, "new", reason),
+        ...typeOut(100, 3, "?"),
+      ];
+      expect(buildReplayTimeline(events).baseline).toBe("new");
+    }
+  });
+
+  it("keeps a genuine mid-session reset instead of rebasing on it", () => {
+    // Same event shape, but ten minutes in — that's a student pressing
+    // "Reset to default code", not the opening race. Their earlier work
+    // has to stay in the replay.
+    const events = [
+      requested(0, "class Solution:"),
+      ...typeOut(100, 15, "abc"),
+      real(10 * 60 * 1000, "class Solution:", "flush"),
+      ...typeOut(10 * 60 * 1000 + 100, 15, "z"),
+    ];
+    const timeline = buildReplayTimeline(events);
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.steps.filter((s) => s.kind === "reset")).toHaveLength(1);
+    expect(textAtStep(timeline, 2)).toBe("class Solution:abc");
+  });
+
+  it("leaves a session alone when it opens on a real baseline", () => {
+    const events = [real(0, "class Solution:", "hook"), ...typeOut(100, 15, "ab")];
+    const timeline = buildReplayTimeline(events);
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.steps).toHaveLength(2);
+  });
+
+  it("leaves pre-`reason` captures alone", () => {
+    // Sessions recorded before snapshots carried a reason still work the
+    // old way rather than silently losing their baseline.
+    const events = [snapshot(0, "class Solution:"), ...typeOut(100, 15, "ab")];
+    expect(buildReplayTimeline(events).baseline).toBe("class Solution:");
+  });
+});

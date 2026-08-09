@@ -69,13 +69,18 @@
     return editorIds.get(editor);
   }
 
-  function snapshotOf(editor) {
+  function snapshotOf(editor, reason) {
     const model = editor.getModel();
     if (!model) return null;
     return {
       type: "snapshot",
       t: performance.now(),
       editorId: editorIdFor(editor),
+      // Why this baseline was taken. "requested" ones are the untrusted
+      // kind — the content script asks for one the moment the URL
+      // changes, which can be before LeetCode has swapped in the new
+      // problem's code. See the read-side rule in keystroke-replay.js.
+      reason,
       text: model.getValue(),
       language: model.getLanguageId?.() ?? null,
       lineCount: model.getLineCount?.() ?? null,
@@ -87,10 +92,10 @@
   // LeetCode swaps the model on the SAME editor instance, so there's no
   // new hook to trigger a snapshot and the next session would otherwise
   // start with no idea what the starter code was.
-  function emitSnapshots() {
+  function emitSnapshots(reason) {
     for (const editor of hookedEditors) {
       try {
-        const snapshot = snapshotOf(editor);
+        const snapshot = snapshotOf(editor, reason);
         if (snapshot) post(snapshot);
       } catch (_error) {
         // Editor disposed between navigation and here — skip it.
@@ -101,7 +106,7 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data?.source !== CMD_SOURCE) return;
-    if (event.data.type === "request-snapshot") emitSnapshots();
+    if (event.data.type === "request-snapshot") emitSnapshots("requested");
   });
 
   function hookEditor(editor) {
@@ -122,7 +127,7 @@
     editor.onDidChangeModelContent((event) => {
       if (event.isFlush) {
         try {
-          const snapshot = snapshotOf(editor);
+          const snapshot = snapshotOf(editor, "flush");
           if (snapshot) post(snapshot);
         } catch (_error) {
           // Non-fatal — the replay just re-bases on the next snapshot.
@@ -150,7 +155,7 @@
     if (typeof editor.onDidChangeModel === "function") {
       editor.onDidChangeModel(() => {
         try {
-          const snapshot = snapshotOf(editor);
+          const snapshot = snapshotOf(editor, "model-change");
           if (snapshot) post(snapshot);
         } catch (_error) {
           // Editor disposed mid-swap — the next hook will re-baseline.
@@ -167,7 +172,7 @@
     // a heuristic baked in at capture time couldn't be revised later
     // without re-recording.
     try {
-      const snapshot = snapshotOf(editor);
+      const snapshot = snapshotOf(editor, "hook");
       if (snapshot) post(snapshot);
     } catch (_error) {
       // Non-fatal — replay just won't have starter code.
@@ -206,6 +211,34 @@
       window.monaco.editor.onDidCreateEditor((editor) => hookEditor(editor));
     }
   }, POLL_INTERVAL_MS);
+
+  // Navigation, detected from the PAGE world.
+  //
+  // The content script can't do this: it runs in an isolated world, so
+  // patching history.pushState there never sees LeetCode's own calls. It
+  // was falling back to polling location.href once a second, which is
+  // far too late — Monaco swaps in the new problem's code inside that
+  // window, so the session opened afterwards and asked for a baseline
+  // that had already moved on. Here the notification is synchronous with
+  // the navigation itself, so the content script opens the new session
+  // BEFORE the model swaps and the model-change snapshot lands in it.
+  function announceNavigation() {
+    post({ type: "navigated", t: performance.now(), href: location.href });
+  }
+
+  for (const method of ["pushState", "replaceState"]) {
+    const original = history[method];
+    history[method] = function (...args) {
+      const result = original.apply(this, args);
+      try {
+        announceNavigation();
+      } catch (_error) {
+        // Never let instrumentation break the page's own navigation.
+      }
+      return result;
+    };
+  }
+  window.addEventListener("popstate", announceNavigation);
 
   post({ type: "injector-loaded", t: performance.now() });
 })();
