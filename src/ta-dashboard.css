@@ -544,3 +544,90 @@
   margin: 0 0 12px 0;
   line-height: 1.5;
 }
+
+/* ---- Replay player ---------------------------------------------------- */
+
+.ks-replay-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  margin: 4px 0 8px 0;
+}
+
+.ks-replay-btn:hover {
+  background: var(--hover-bg);
+}
+
+.ks-replay-unavailable {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 4px 0 12px 0;
+}
+
+.ks-replay-code {
+  margin: 0 0 8px 0;
+  padding: 12px;
+  background: #1f2937;
+  color: #e5e7eb;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 240px;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.ks-replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ks-replay-play {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  width: 34px;
+  height: 30px;
+  font-size: 12px;
+  cursor: pointer;
+  flex: none;
+}
+
+.ks-replay-play:hover {
+  background: var(--accent-hover);
+}
+
+.ks-replay-scrubber {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.ks-replay-speed {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text-primary);
+}
+
+.ks-replay-position {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  min-width: 150px;
+  text-align: right;
+}

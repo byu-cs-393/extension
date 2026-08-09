@@ -471,3 +471,124 @@ describe("mixed-editor caveat", () => {
     expect($(".ks-caveat")).toBe(null);
   });
 });
+
+describe("replay player", () => {
+  const EDITOR = "sol";
+  const snap = (at, text) => ({
+    kind: "snapshot", t: at, wallMs: T0 + at, editorId: EDITOR,
+    text, language: "python",
+  });
+  const typeAt = (at, offset, ch) => ({
+    kind: "delta", t: at, wallMs: T0 + at, editorId: EDITOR,
+    offset, length: 0, text: ch,
+  });
+  const codeEvents = () => [
+    snap(0, "class Solution:"),
+    ...[..."\n    pass"].map((ch, i) => typeAt(100 + i * 100, 15 + i, ch)),
+  ];
+
+  async function openSession(events) {
+    const { deps } = fakeFirestore(events);
+    renderKeystrokeSection(container, "jack684", [session()], deps);
+    await click($(".ks-session-head"));
+  }
+
+  it("offers replay for a session with editor ids", async () => {
+    await openSession(codeEvents());
+    expect($(".ks-replay-btn")).not.toBe(null);
+    expect($(".ks-replay-unavailable")).toBe(null);
+  });
+
+  it("refuses replay for a pre-editorId session and says why", async () => {
+    // A replay folded from two interleaved editors would look real and
+    // be wrong, so it isn't offered at all.
+    await openSession(humanEvents());
+    expect($(".ks-replay-btn")).toBe(null);
+    expect($(".ks-replay-unavailable").textContent).toMatch(/two editors|interleaved/i);
+  });
+
+  it("shows the starter code before anything is played", async () => {
+    await openSession(codeEvents());
+    await click($(".ks-replay-btn"));
+    expect($(".ks-replay-code").textContent).toBe("class Solution:");
+  });
+
+  it("renders student code as text, never as markup", async () => {
+    // Student source lands in a TA's page; innerHTML here would execute it.
+    const evil = "<img src=x onerror=alert(1)>";
+    await openSession([snap(0, evil), typeAt(100, evil.length, "!")]);
+    await click($(".ks-replay-btn"));
+    const code = $(".ks-replay-code");
+    expect(code.textContent).toBe(evil);
+    expect(code.querySelector("img")).toBe(null);
+  });
+
+  it("scrubbing to the end shows the final document", async () => {
+    await openSession(codeEvents());
+    await click($(".ks-replay-btn"));
+
+    const scrubber = $(".ks-replay-scrubber");
+    scrubber.value = scrubber.max;
+    scrubber.dispatchEvent(new Event("input"));
+
+    expect($(".ks-replay-code").textContent).toBe("class Solution:\n    pass");
+  });
+
+  it("scrubbing back to zero returns to the starting text", async () => {
+    await openSession(codeEvents());
+    await click($(".ks-replay-btn"));
+
+    const scrubber = $(".ks-replay-scrubber");
+    scrubber.value = scrubber.max;
+    scrubber.dispatchEvent(new Event("input"));
+    scrubber.value = "0";
+    scrubber.dispatchEvent(new Event("input"));
+
+    expect($(".ks-replay-code").textContent).toBe("class Solution:");
+  });
+
+  it("reports position as edits applied and elapsed session time", async () => {
+    await openSession(codeEvents());
+    await click($(".ks-replay-btn"));
+    // At rest nothing has been applied yet — the lead-in exists so the
+    // starting document is visible before the first keystroke lands.
+    expect($(".ks-replay-position").textContent).toMatch(/^0\/9 edits · /);
+
+    const scrubber = $(".ks-replay-scrubber");
+    scrubber.value = scrubber.max;
+    scrubber.dispatchEvent(new Event("input"));
+    expect($(".ks-replay-position").textContent).toMatch(/^9\/9 edits · /);
+  });
+
+  it("toggles the player closed again", async () => {
+    await openSession(codeEvents());
+    const btn = $(".ks-replay-btn");
+
+    await click(btn);
+    expect($(".ks-replay-code")).not.toBe(null);
+    expect(btn.textContent).toMatch(/hide/i);
+
+    await click(btn);
+    expect($(".ks-replay-code")).toBe(null);
+    expect(btn.textContent).toMatch(/replay session/i);
+  });
+
+  it("surfaces a mid-edit warning from the timeline", async () => {
+    // No snapshot — the injector hooked Monaco after typing began.
+    const events = [..."abc"].map((ch, i) => typeAt(100 + i * 100, i, ch));
+    await openSession(events);
+    await click($(".ks-replay-btn"));
+    expect($(".ks-caveat").textContent).toMatch(/started mid-edit/i);
+  });
+
+  it("stops playback when the session row is collapsed", async () => {
+    // Otherwise a timer keeps ticking against a hidden panel.
+    await openSession(codeEvents());
+    await click($(".ks-replay-btn"));
+    await click($(".ks-replay-play"));
+    expect($(".ks-replay-play").textContent).not.toBe("▶");
+
+    await click($(".ks-session-head")); // collapse
+    expect($(".ks-replay-play").textContent).toBe("▶");
+  });
+});

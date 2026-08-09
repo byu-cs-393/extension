@@ -21,9 +21,18 @@
 // keystroke-analysis.js for why.
 import { fetchCollection as firestoreFetchCollection } from "./firestore.js";
 import {
+  canReplay,
+  buildReplayTimeline,
+  compressIdleGaps,
+  textAtStep,
+  stepIndexAtPlaybackMs,
+  offsetMsAtStep,
+} from "./keystroke-replay.js";
+import {
   summarizeSession,
   suspicionSignals,
   resolveProblemTitle,
+  flattenChunks,
   totalActiveMs,
   activeMsByProblem,
   formatDuration,
@@ -47,6 +56,9 @@ export async function fetchKeystrokeSessions(netID, deps = {}) {
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 }
 
+// Returns { summary, events } — the player needs the raw event stream to
+// rebuild the document, and refetching it on every Replay click would be
+// wasteful when a TA is already looking at the session.
 async function loadSessionSummary(netID, session, deps) {
   const cached = sessionSummaryCache.get(session.sessionId);
   if (cached) return cached;
@@ -54,9 +66,12 @@ async function loadSessionSummary(netID, session, deps) {
   const chunks = await fetchCollection(
     `students/${netID}/keystrokeSessions/${session.sessionId}/chunks`,
   );
-  const summary = summarizeSession(session, chunks);
-  sessionSummaryCache.set(session.sessionId, summary);
-  return summary;
+  const entry = {
+    summary: summarizeSession(session, chunks),
+    events: flattenChunks(chunks),
+  };
+  sessionSummaryCache.set(session.sessionId, entry);
+  return entry;
 }
 
 export function renderKeystrokeSection(body, netID, sessions, deps = {}) {
@@ -220,12 +235,12 @@ function renderSessionRow(netID, session, deps) {
   let loading = null;
 
   async function analyze() {
-    if (loaded) return sessionSummaryCache.get(session.sessionId);
+    if (loaded) return sessionSummaryCache.get(session.sessionId)?.summary;
     if (loading) return loading;
     loading = (async () => {
       try {
-        const summary = await loadSessionSummary(netID, session, deps);
-        renderSessionDetail(detail, summary);
+        const { summary, events } = await loadSessionSummary(netID, session, deps);
+        renderSessionDetail(detail, summary, events);
         loaded = true;
         return summary;
       } finally {
@@ -242,6 +257,9 @@ function renderSessionRow(netID, session, deps) {
     const opening = detail.hidden;
     detail.hidden = !opening;
     chevron.textContent = opening ? "▾" : "▸";
+    // Collapsing while a replay is playing would leave a timer running
+    // against a hidden panel.
+    if (!opening) detail.__stopReplay?.();
     if (!opening || loaded) return;
     detail.innerHTML = '<p class="ta-empty">Loading events…</p>';
     try {
@@ -255,7 +273,7 @@ function renderSessionRow(netID, session, deps) {
   return { element, analyze };
 }
 
-function renderSessionDetail(container, summary) {
+function renderSessionDetail(container, summary, events = []) {
   container.innerHTML = "";
 
   const stats = document.createElement("div");
@@ -292,6 +310,9 @@ function renderSessionDetail(container, summary) {
     container.appendChild(caveat);
   }
 
+  const stopReplay = appendReplayControl(container, events);
+  container.__stopReplay = stopReplay;
+
   const signals = suspicionSignals(summary);
   if (signals.length === 0) {
     const none = document.createElement("p");
@@ -327,6 +348,155 @@ function renderSessionDetail(container, summary) {
     card.append(label, detail, innocent);
     container.appendChild(card);
   }
+}
+
+// ---- Replay player -----------------------------------------------------
+
+// Tick cadence for playback. Coarse enough to be cheap, fine enough that
+// typing looks like typing rather than a slideshow.
+const TICK_MS = 50;
+
+// Appends a "Replay session" control. Sessions the capture can't
+// faithfully reconstruct get the reason instead of a player — see
+// canReplay() for why a wrong replay is worse than none.
+function appendReplayControl(container, events) {
+  const verdict = canReplay(events);
+  if (!verdict.ok) {
+    const note = document.createElement("p");
+    note.className = "ks-replay-unavailable";
+    note.textContent = `Replay unavailable. ${verdict.reason}`;
+    container.appendChild(note);
+    return () => {};
+  }
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ks-replay-btn";
+  btn.textContent = "▶ Replay session";
+  container.appendChild(btn);
+
+  const mount = document.createElement("div");
+  mount.className = "ks-replay-mount";
+  container.appendChild(mount);
+
+  let teardown = () => {};
+  btn.addEventListener("click", () => {
+    if (mount.childElementCount > 0) {
+      teardown();
+      teardown = () => {};
+      mount.innerHTML = "";
+      btn.textContent = "▶ Replay session";
+      return;
+    }
+    teardown = renderReplayPlayer(mount, events);
+    btn.textContent = "▼ Hide replay";
+  });
+
+  // Returned so collapsing the session row can stop a running playback
+  // instead of leaving a timer ticking against a hidden panel.
+  return () => teardown();
+}
+
+function renderReplayPlayer(mount, events) {
+  const timeline = compressIdleGaps(buildReplayTimeline(events));
+  const lastIndex = timeline.steps.length - 1;
+  const totalMs = timeline.playbackDurationMs ?? 0;
+
+  for (const warning of timeline.warnings) {
+    const el = document.createElement("p");
+    el.className = "ks-caveat";
+    el.textContent = warning;
+    mount.appendChild(el);
+  }
+
+  const code = document.createElement("pre");
+  code.className = "ks-replay-code";
+  // textContent, never innerHTML — this is student-authored source and
+  // would otherwise execute in the TA's page.
+  code.textContent = timeline.baseline;
+  mount.appendChild(code);
+
+  const controls = document.createElement("div");
+  controls.className = "ks-replay-controls";
+
+  const playBtn = document.createElement("button");
+  playBtn.type = "button";
+  playBtn.className = "ks-replay-play";
+  playBtn.textContent = "▶";
+  playBtn.setAttribute("aria-label", "Play");
+
+  const scrubber = document.createElement("input");
+  scrubber.type = "range";
+  scrubber.className = "ks-replay-scrubber";
+  scrubber.min = "0";
+  scrubber.max = String(Math.max(totalMs, 1));
+  scrubber.value = "0";
+  scrubber.setAttribute("aria-label", "Position in replay");
+
+  const speed = document.createElement("select");
+  speed.className = "ks-replay-speed";
+  for (const [value, label] of [["1", "1×"], ["4", "4×"], ["16", "16×"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    if (value === "4") option.selected = true;
+    speed.appendChild(option);
+  }
+
+  const position = document.createElement("span");
+  position.className = "ks-replay-position";
+
+  controls.append(playBtn, scrubber, speed, position);
+  mount.appendChild(controls);
+
+  let offsetMs = 0;
+  let timer = null;
+
+  function render() {
+    const index = stepIndexAtPlaybackMs(timeline, offsetMs);
+    code.textContent = textAtStep(timeline, index);
+    scrubber.value = String(Math.round(offsetMs));
+    const shown = index < 0 ? 0 : index + 1;
+    // Elapsed shows REAL time into the session, not compressed playback
+    // time — a TA reading "12m in" wants the student's clock, not ours.
+    position.textContent =
+      `${shown}/${timeline.steps.length} edits · ` +
+      `${formatDuration(offsetMsAtStep(timeline, index))} in`;
+  }
+
+  function stop() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+    playBtn.textContent = "▶";
+    playBtn.setAttribute("aria-label", "Play");
+  }
+
+  function start() {
+    if (timer !== null) return;
+    if (offsetMs >= totalMs) offsetMs = 0; // replay again from the top
+    playBtn.textContent = "❚❚";
+    playBtn.setAttribute("aria-label", "Pause");
+    timer = setInterval(() => {
+      offsetMs += TICK_MS * Number(speed.value);
+      if (offsetMs >= totalMs) {
+        offsetMs = totalMs;
+        render();
+        stop();
+        return;
+      }
+      render();
+    }, TICK_MS);
+  }
+
+  playBtn.addEventListener("click", () => (timer === null ? start() : stop()));
+  scrubber.addEventListener("input", () => {
+    stop();
+    offsetMs = Number(scrubber.value);
+    render();
+  });
+
+  render();
+  return stop;
 }
 
 function addStat(grid, label, value) {
