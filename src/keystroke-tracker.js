@@ -132,6 +132,51 @@ function getProblemTitle(slug) {
   return slugToTitle(slug);
 }
 
+// ---- Extension lifecycle -----------------------------------------------
+//
+// Reloading or updating the extension orphans every content script
+// already running in an open tab: chrome.* handles throw "Extension
+// context invalidated" and nothing can be written again from this page.
+//
+// That has to be handled loudly rather than swallowed. The buffer would
+// otherwise keep growing, every flush would fail and re-queue, and the
+// red recording badge would sit there claiming to record a session that
+// is going nowhere — a student could work for an hour on that promise.
+// Chrome auto-updates extensions, so this will happen to real students
+// mid-problem, not just to us reloading during development.
+
+let contextInvalidated = false;
+let flushTimer = null;
+let locationTimer = null;
+
+function extensionContextAlive() {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isContextInvalidatedError(error) {
+  return /extension context invalidated|message port closed/i.test(
+    String(error?.message ?? error),
+  );
+}
+
+function handleContextInvalidated() {
+  if (contextInvalidated) return;
+  contextInvalidated = true;
+  if (flushTimer !== null) clearInterval(flushTimer);
+  if (locationTimer !== null) clearInterval(locationTimer);
+  // Drop the buffer rather than hold events that can never be written.
+  session = null;
+  markBadgeStopped();
+  console.warn(
+    "[CS 393 Buddy] the extension was reloaded or updated — recording has " +
+      "STOPPED for this tab. Reload the page to start recording again.",
+  );
+}
+
 // ---- Session state -----------------------------------------------------
 
 let netID = null;
@@ -209,11 +254,20 @@ async function ensureSessionMetadata() {
     });
     session.metadataWritten = true;
   } catch (error) {
+    if (isContextInvalidatedError(error)) {
+      handleContextInvalidated();
+      return;
+    }
     console.error("[CS 393 Buddy] keystroke session metadata write failed:", error);
   }
 }
 
 async function flushBuffer(endReason) {
+  if (contextInvalidated) return;
+  if (!extensionContextAlive()) {
+    handleContextInvalidated();
+    return;
+  }
   if (!session) return;
   if (session.buffer.length === 0 && !endReason) return;
 
@@ -237,9 +291,15 @@ async function flushBuffer(endReason) {
       session.chunkIndex += 1;
       session.deltaCount += events.length;
     } catch (error) {
+      if (isContextInvalidatedError(error)) {
+        handleContextInvalidated();
+        return;
+      }
       console.error("[CS 393 Buddy] keystroke chunk write failed:", error);
       // Put the events back on the front of the buffer so we retry
-      // on the next flush.
+      // on the next flush. Safe only for transient failures — an
+      // invalidated context is handled above, or this would grow without
+      // bound behind a badge that still says "recording".
       session.buffer = events.concat(session.buffer);
       return;
     }
@@ -260,11 +320,16 @@ async function flushBuffer(endReason) {
     if (endReason) patch.endedAt = Date.now();
     await patchFirestoreDoc(sessionPath, patch);
   } catch (error) {
+    if (isContextInvalidatedError(error)) {
+      handleContextInvalidated();
+      return;
+    }
     console.error("[CS 393 Buddy] keystroke session rollup failed:", error);
   }
 }
 
 function pushEvent(event) {
+  if (contextInvalidated) return;
   if (!session) {
     const slug = parseProblemSlug(location.href);
     if (!slug) return;
@@ -412,7 +477,8 @@ history.pushState = function (...args) {
 // flushes the outgoing one before opening the next.
 const LOCATION_POLL_MS = 1000;
 let lastSeenHref = location.href;
-setInterval(() => {
+locationTimer = setInterval(() => {
+  if (contextInvalidated) return;
   if (location.href === lastSeenHref) return;
   lastSeenHref = location.href;
   onLocationChange();
@@ -471,6 +537,20 @@ function mountBadge() {
   document.body.appendChild(badge);
 }
 
+// Turns the badge into a visible, honest "not recording any more" state.
+// The whole point of the badge is that a student can trust it, which
+// means it has to stop claiming to record the moment it can't.
+function markBadgeStopped() {
+  const badge = document.getElementById("cs393-recording-badge");
+  if (!badge) return;
+  badge.setAttribute(
+    "aria-label",
+    "CS 393 Buddy: recording stopped, reload the page",
+  );
+  badge.style.background = "rgba(120, 113, 108, 0.95)";
+  badge.textContent = "⏸ CS 393 recording stopped — reload page";
+}
+
 // ---- Bootstrap ---------------------------------------------------------
 
 (async () => {
@@ -491,5 +571,5 @@ function mountBadge() {
   const slug = parseProblemSlug(location.href);
   if (slug) newSession(slug);
 
-  setInterval(() => flushBuffer(), FLUSH_INTERVAL_MS);
+  flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL_MS);
 })();

@@ -79,7 +79,43 @@ async function authedHeaders(extra = {}) {
   return headers;
 }
 
+// Reloading or updating the extension orphans this content script:
+// chrome.* handles start throwing "Extension context invalidated" and
+// nothing more can be written from this page. Detect it once and stop,
+// instead of failing on every problem the student opens afterwards. The
+// keystroke tracker does the same, and additionally flips its recording
+// badge — see handleContextInvalidated there.
+let contextInvalidated = false;
+
+function extensionContextAlive() {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isContextInvalidatedError(error) {
+  return /extension context invalidated|message port closed/i.test(
+    String(error?.message ?? error),
+  );
+}
+
+function noteContextInvalidated() {
+  if (contextInvalidated) return;
+  contextInvalidated = true;
+  console.warn(
+    "[CS 393 Buddy] the extension was reloaded or updated — this tab is no " +
+      "longer being tracked. Reload the page to resume.",
+  );
+}
+
 async function postActivityEvent(fields) {
+  if (contextInvalidated) return null;
+  if (!extensionContextAlive()) {
+    noteContextInvalidated();
+    return null;
+  }
   const url = `${FIRESTORE_BASE}/activity?key=${firebaseConfig.apiKey}`;
   const response = await fetch(url, {
     method: "POST",
@@ -118,6 +154,10 @@ async function logOpenProblem(slug) {
     });
     console.log(`[CS 393 Buddy] open_problem: ${slug}`);
   } catch (error) {
+    if (isContextInvalidatedError(error)) {
+      noteContextInvalidated();
+      return;
+    }
     console.error("[CS 393 Buddy] failed to log open_problem:", error);
   }
 }
@@ -134,6 +174,10 @@ async function logVerdict(slug, verdict) {
     });
     console.log(`[CS 393 Buddy] ${eventType}: ${slug} (${verdict})`);
   } catch (error) {
+    if (isContextInvalidatedError(error)) {
+      noteContextInvalidated();
+      return;
+    }
     console.error("[CS 393 Buddy] failed to log verdict:", error);
   }
   if (eventType === "submit_pass") {
