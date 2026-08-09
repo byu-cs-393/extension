@@ -84,14 +84,41 @@ export function canReplay(events) {
 // rebuilds the editor on a language change. A reset replaces the whole
 // document rather than editing it; treating it as a baseline instead
 // would silently drop everything typed before the switch.
+// Drops any snapshot that's immediately followed by another snapshot
+// with no edit in between — the earlier one never described a document
+// the student did anything to.
+//
+// This is what happens on navigation. The session opens as soon as the
+// URL changes and asks for a baseline, but LeetCode hasn't swapped
+// Monaco's model yet, so that first snapshot still holds the PREVIOUS
+// problem's code. A moment later the real one arrives. Believing the
+// first is how a replay opens on the wrong problem and then appears to
+// contain no edits at all, since every later offset is measured against
+// a document that was never on screen.
+//
+// The input here is already filtered to snapshots and deltas, so "the
+// next event is a snapshot" is exactly "nothing was edited in between".
+function dropSupersededSnapshots(events) {
+  const kept = [];
+  for (let i = 0; i < events.length; i += 1) {
+    if (events[i].kind === "snapshot" && events[i + 1]?.kind === "snapshot") {
+      continue;
+    }
+    kept.push(events[i]);
+  }
+  return kept;
+}
+
 export function buildReplayTimeline(events, { editorId = null } = {}) {
   const targetEditor = editorId ?? primaryEditorId(events);
   const warnings = [];
 
-  const relevant = (events ?? []).filter(
-    (event) =>
-      (event?.kind === "delta" || event?.kind === "snapshot") &&
-      (targetEditor === null || event.editorId === targetEditor),
+  const relevant = dropSupersededSnapshots(
+    (events ?? []).filter(
+      (event) =>
+        (event?.kind === "delta" || event?.kind === "snapshot") &&
+        (targetEditor === null || event.editorId === targetEditor),
+    ),
   );
 
   let baseline = "";

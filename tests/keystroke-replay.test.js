@@ -332,3 +332,71 @@ describe("stepIndexAtPlaybackMs", () => {
     expect(stepIndexAtPlaybackMs({ playbackMs: [] }, 0)).toBe(-1);
   });
 });
+
+describe("stale baselines from navigation and code resets", () => {
+  it("ignores a snapshot that another snapshot immediately supersedes", () => {
+    // The navigation race: the session opens when the URL changes and
+    // asks for a baseline, but Monaco still holds the PREVIOUS problem's
+    // model. The real starter code lands a moment later.
+    const events = [
+      snapshot(0, "class PreviousProblem:"),
+      snapshot(50, "class Solution:"),
+      ...typeOut(100, 15, "\n    pass"),
+    ];
+    const timeline = buildReplayTimeline(events);
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.steps.filter((s) => s.kind === "reset")).toHaveLength(0);
+    expect(timeline.finalText).toBe("class Solution:\n    pass");
+  });
+
+  it("collapses a whole run of superseded snapshots", () => {
+    const events = [
+      snapshot(0, "one"),
+      snapshot(10, "two"),
+      snapshot(20, "three"),
+      ...typeOut(100, 5, "!"),
+    ];
+    expect(buildReplayTimeline(events).baseline).toBe("three");
+  });
+
+  it("keeps a snapshot that follows real edits as a reset", () => {
+    // "Reset to default code" mid-session: the document genuinely
+    // changed and the earlier typing still happened.
+    const events = [
+      snapshot(0, "class Solution:"),
+      ...typeOut(100, 15, "abc"),
+      snapshot(500, "class Solution:"),
+      ...typeOut(600, 15, "xy"),
+    ];
+    const timeline = buildReplayTimeline(events);
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.steps.filter((s) => s.kind === "reset")).toHaveLength(1);
+    expect(textAtStep(timeline, 2)).toBe("class Solution:abc");
+    expect(timeline.finalText).toBe("class Solution:xy");
+  });
+
+  it("produces no desync warning for the navigation race", () => {
+    // Before the fix, edits were measured against the previous problem's
+    // text and clamped, which is what made the replay look empty.
+    const events = [
+      snapshot(0, "a much longer previous problem body"),
+      snapshot(50, "short"),
+      ...typeOut(100, 5, "!!"),
+    ];
+    expect(buildReplayTimeline(events).warnings).toEqual([]);
+  });
+
+  it("does not collapse across editors", () => {
+    // Two editors each posting a baseline is not a supersede — they're
+    // different documents. The solution editor's own baseline must
+    // survive being adjacent to the testcase pane's.
+    const events = [
+      snapshot(0, "[1,2]", { editorId: "tests", language: "plaintext" }),
+      snapshot(10, "class Solution:", { editorId: "sol" }),
+      delta(100, 15, 0, "!", { editorId: "sol" }),
+    ];
+    const timeline = buildReplayTimeline(events, { editorId: "sol" });
+    expect(timeline.baseline).toBe("class Solution:");
+    expect(timeline.finalText).toBe("class Solution:!");
+  });
+});

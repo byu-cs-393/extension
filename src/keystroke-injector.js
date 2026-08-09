@@ -109,12 +109,26 @@
     hookedEditors.add(editor);
     const editorId = editorIdFor(editor);
 
-    // We ignore change events with `isFlush` — Monaco fires those when
-    // the whole buffer is reset (e.g., switching problems). Those
-    // aren't user edits, they're state transitions; recording them
-    // would create huge "insert the entire starter code" deltas.
+    // `isFlush` means the whole buffer was replaced rather than edited:
+    // the student pressed "Reset to default code", or LeetCode loaded a
+    // different problem's starter code into this same model.
+    //
+    // Recording it as a delta would be wrong — it isn't a user edit, and
+    // it would show up as one enormous insert. But DROPPING it is also
+    // wrong, which is what used to happen: the document silently became
+    // something else while the replay went on applying edits to the old
+    // text, so everything after the reset was offset garbage. Re-emit a
+    // snapshot instead, which the read side treats as a new baseline.
     editor.onDidChangeModelContent((event) => {
-      if (event.isFlush) return;
+      if (event.isFlush) {
+        try {
+          const snapshot = snapshotOf(editor);
+          if (snapshot) post(snapshot);
+        } catch (_error) {
+          // Non-fatal — the replay just re-bases on the next snapshot.
+        }
+        return;
+      }
       for (const change of event.changes) {
         post({
           type: "delta",
@@ -126,6 +140,23 @@
         });
       }
     });
+
+    // Monaco swaps the MODEL (rather than its contents) when LeetCode
+    // moves to a different problem. That's the moment the new starter
+    // code actually exists — the URL changed up to a second earlier, so
+    // a snapshot taken at navigation time still holds the previous
+    // problem's code, which is exactly how a replay ends up opening on
+    // the wrong problem.
+    if (typeof editor.onDidChangeModel === "function") {
+      editor.onDidChangeModel(() => {
+        try {
+          const snapshot = snapshotOf(editor);
+          if (snapshot) post(snapshot);
+        } catch (_error) {
+          // Editor disposed mid-swap — the next hook will re-baseline.
+        }
+      });
+    }
 
     // Emit a snapshot of the buffer at hook time so the replay has a
     // baseline. Without this, the first deltas would apply against an
