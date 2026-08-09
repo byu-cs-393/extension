@@ -592,3 +592,58 @@ describe("replay player", () => {
     expect($(".ks-replay-play").textContent).toBe("▶");
   });
 });
+
+describe("refresh", () => {
+  it("re-lists sessions recorded while the TA was already looking", async () => {
+    // The reason this exists: a student solves a problem mid-review, and
+    // reloading the whole dashboard to see it is a poor answer.
+    let sessions = [session()];
+    const deps = {
+      fetchCollection: vi.fn(async (path) => {
+        if (path.endsWith("/keystrokeSessions")) return sessions;
+        return [{ chunkIndex: 0, events: humanEvents() }];
+      }),
+    };
+    renderKeystrokeSection(container, "jack684", sessions, deps);
+    expect($$(".ks-session")).toHaveLength(1);
+
+    sessions = [
+      session({ sessionId: "lru-9", problemSlug: "lru-cache", problemTitle: "LRU Cache" }),
+      session(),
+    ];
+    await click($(".ks-refresh-btn"));
+
+    expect($$(".ks-session")).toHaveLength(2);
+    expect($$(".ks-session-title").map((e) => e.textContent)).toContain("LRU Cache");
+  });
+
+  it("reports a failed refresh instead of blanking the section", async () => {
+    const deps = {
+      fetchCollection: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    };
+    renderKeystrokeSection(container, "jack684", [session()], deps);
+    await click($(".ks-refresh-btn"));
+
+    expect($(".ks-panel").textContent).toMatch(/failed to refresh: offline/i);
+    expect($(".ks-refresh-btn").disabled).toBe(false);
+  });
+
+  it("goes from empty to populated", async () => {
+    let sessions = [];
+    const deps = {
+      fetchCollection: vi.fn(async (path) =>
+        path.endsWith("/keystrokeSessions") ? sessions : [],
+      ),
+    };
+    renderKeystrokeSection(container, "jack684", sessions, deps);
+    expect($(".ta-empty")).not.toBe(null);
+
+    sessions = [session()];
+    await click($(".ks-refresh-btn"));
+
+    expect($(".ta-empty")).toBe(null);
+    expect($$(".ks-session")).toHaveLength(1);
+  });
+});

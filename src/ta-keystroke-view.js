@@ -80,6 +80,42 @@ export function renderKeystrokeSection(body, netID, sessions, deps = {}) {
   h2.className = "student-detail-section";
   body.appendChild(h2);
 
+  // Sessions land in Firestore while a TA is looking at the page. Rather
+  // than make them reload the whole dashboard, this re-lists just this
+  // section in place.
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "ks-refresh-btn";
+  refreshBtn.textContent = "↻ Refresh";
+  body.appendChild(refreshBtn);
+
+  const panel = document.createElement("div");
+  panel.className = "ks-panel";
+  body.appendChild(panel);
+
+  refreshBtn.addEventListener("click", async () => {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "↻ Refreshing…";
+    try {
+      // Drop cached summaries too — a session that was still being
+      // written when it was last analyzed has more chunks by now.
+      clearSessionCache();
+      const fresh = await fetchKeystrokeSessions(netID, deps);
+      panel.innerHTML = "";
+      renderSessionPanel(panel, netID, fresh, deps);
+    } catch (err) {
+      console.error("Failed to refresh keystroke sessions:", err);
+      panel.innerHTML = `<p class="ta-empty">Failed to refresh: ${err.message}</p>`;
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "↻ Refresh";
+    }
+  });
+
+  renderSessionPanel(panel, netID, sessions, deps);
+}
+
+function renderSessionPanel(body, netID, sessions, deps) {
   if (sessions.length === 0) {
     const empty = document.createElement("p");
     empty.className = "ta-empty";

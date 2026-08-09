@@ -997,12 +997,14 @@ async function route() {
     if (lastLoadedView !== "students") await loadAndRenderStruggling();
     lastLoadedView = "students";
   } else if (view === "student") {
-    // If netID changed, refresh. Otherwise reuse what's on screen.
-    if (netID !== lastLoadedNetID) {
-      selectedNetID = netID;
-      lastLoadedNetID = netID;
-      await loadAndRenderStudentDetail();
-    }
+    // Always refetch, even when it's the same student as last time.
+    // Reusing what's on screen meant a TA who left this view and came
+    // back saw a stale snapshot — sessions a student had recorded in the
+    // meantime were simply missing, with no way to refresh short of F5.
+    // One extra fetch per navigation is a fair price for a live view.
+    selectedNetID = netID;
+    lastLoadedNetID = netID;
+    await loadAndRenderStudentDetail();
     lastLoadedView = "student";
   }
 }
