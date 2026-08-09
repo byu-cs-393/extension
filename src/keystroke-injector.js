@@ -10,6 +10,23 @@
 
 (() => {
   const SOURCE = "cs393-keystroke";
+  // Commands travel content script → page. Tagged separately from SOURCE
+  // so the injector's own postMessages don't feed back into its listener.
+  const CMD_SOURCE = "cs393-keystroke-cmd";
+
+  // keystroke-tracker.js re-injects this file on every SPA navigation.
+  // Hooking an editor twice would post every keystroke twice — and four
+  // times after two more navigations — so the first instance stays
+  // resident and later injections bail out immediately. It keeps polling,
+  // so editors mounted later are still picked up.
+  if (window.__cs393KeystrokeInjector) {
+    window.postMessage(
+      { source: SOURCE, type: "injector-already-loaded", t: performance.now() },
+      "*",
+    );
+    return;
+  }
+  window.__cs393KeystrokeInjector = true;
 
   // Monaco can take a moment to appear (LeetCode lazy-loads it). Poll
   // until we find it, then hook. Cap the polling so we don't loop
@@ -17,7 +34,10 @@
   // shell without an editor — e.g., the problem list).
   const POLL_INTERVAL_MS = 250;
   const POLL_TIMEOUT_MS = 30_000;
-  const hookedEditors = new WeakSet();
+  // A Set, not a WeakSet, because snapshots have to be re-emitted for
+  // every hooked editor when a new session opens. A page holds a handful
+  // of editors, so retaining them is not a meaningful leak.
+  const hookedEditors = new Set();
 
   function post(payload) {
     window.postMessage({ source: SOURCE, ...payload }, "*");
@@ -48,6 +68,41 @@
     }
     return editorIds.get(editor);
   }
+
+  function snapshotOf(editor) {
+    const model = editor.getModel();
+    if (!model) return null;
+    return {
+      type: "snapshot",
+      t: performance.now(),
+      editorId: editorIdFor(editor),
+      text: model.getValue(),
+      language: model.getLanguageId?.() ?? null,
+      lineCount: model.getLineCount?.() ?? null,
+    };
+  }
+
+  // Re-emits a baseline for every hooked editor. The tracker asks for
+  // this when it opens a session, which matters on SPA navigation:
+  // LeetCode swaps the model on the SAME editor instance, so there's no
+  // new hook to trigger a snapshot and the next session would otherwise
+  // start with no idea what the starter code was.
+  function emitSnapshots() {
+    for (const editor of hookedEditors) {
+      try {
+        const snapshot = snapshotOf(editor);
+        if (snapshot) post(snapshot);
+      } catch (_error) {
+        // Editor disposed between navigation and here — skip it.
+      }
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data?.source !== CMD_SOURCE) return;
+    if (event.data.type === "request-snapshot") emitSnapshots();
+  });
 
   function hookEditor(editor) {
     if (hookedEditors.has(editor)) return;
@@ -81,17 +136,8 @@
     // a heuristic baked in at capture time couldn't be revised later
     // without re-recording.
     try {
-      const model = editor.getModel();
-      if (model) {
-        post({
-          type: "snapshot",
-          t: performance.now(),
-          editorId,
-          text: model.getValue(),
-          language: model.getLanguageId?.() ?? null,
-          lineCount: model.getLineCount?.() ?? null,
-        });
-      }
+      const snapshot = snapshotOf(editor);
+      if (snapshot) post(snapshot);
     } catch (_error) {
       // Non-fatal — replay just won't have starter code.
     }

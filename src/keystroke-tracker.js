@@ -38,6 +38,8 @@ const FLUSH_INTERVAL_MS = 5_000;
 // Session ends after this much idle time. Next event starts a new one.
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const INJECTOR_MESSAGE_SOURCE = "cs393-keystroke";
+// Commands going the other way, content script → injector.
+const INJECTOR_COMMAND_SOURCE = "cs393-keystroke-cmd";
 
 // ---- Firestore helpers -------------------------------------------------
 
@@ -162,7 +164,19 @@ function newSession(slug) {
     lastActivityAt: startedAt,
   };
   console.log(`[CS 393 Buddy] keystroke session started: ${sessionId}`);
+  // Ask for a fresh baseline. On SPA navigation LeetCode swaps the model
+  // on the SAME editor instance, so nothing re-hooks and no snapshot
+  // would otherwise be emitted — leaving this session with no idea what
+  // the starter code was, and its replay starting from nothing.
+  requestSnapshots();
   return session;
+}
+
+function requestSnapshots() {
+  window.postMessage(
+    { source: INJECTOR_COMMAND_SOURCE, type: "request-snapshot" },
+    "*",
+  );
 }
 
 // Metadata is written on the first flush, up to FLUSH_INTERVAL_MS after
@@ -305,7 +319,11 @@ window.addEventListener("message", (event) => {
       language: data.language,
       lineCount: data.lineCount ?? null,
     });
-  } else if (data.type === "editor-hooked" || data.type === "injector-loaded") {
+  } else if (
+    data.type === "editor-hooked" ||
+    data.type === "injector-loaded" ||
+    data.type === "injector-already-loaded"
+  ) {
     console.log(`[CS 393 Buddy] injector: ${data.type}`);
   }
 });
@@ -367,15 +385,38 @@ window.addEventListener("beforeunload", () => {
 
 // ---- SPA navigation (problem → problem) --------------------------------
 //
-// leetcode-tracker.js already patches history.pushState to dispatch a
-// "locationchange" event. If that content script loaded first (it's
-// listed first in manifest.json), we can piggyback. If not, patch it
-// ourselves — the double-patch is safe because we call the original.
+// Detecting that the student moved to a different problem WITHOUT a page
+// load is the whole ballgame here: miss it and the next problem's edits
+// are appended to the previous problem's session, or dropped entirely.
+//
+// Three mechanisms, because the first two each have holes:
+//
+//   1. popstate — only fires for back/forward, not for in-app clicks.
+//   2. A patched history.pushState. Content scripts run in an ISOLATED
+//      world with their own JS globals, so patching pushState here does
+//      NOT intercept the page's own calls to it. It only catches calls
+//      made from another content script. Kept because it costs nothing
+//      and fires earlier than polling when it does apply.
+//   3. Polling location.href. Unglamorous and completely reliable — it
+//      doesn't care how the navigation happened (pushState,
+//      replaceState, or a framework router that bypasses both). This is
+//      the one actually load-bearing for LeetCode's own navigation.
 const origPushState = history.pushState;
 history.pushState = function (...args) {
   origPushState.apply(this, args);
   window.dispatchEvent(new Event("locationchange"));
 };
+
+// A second of latency is invisible next to a 5s flush interval, and any
+// edits in that window still land in the correct session — onLocationChange
+// flushes the outgoing one before opening the next.
+const LOCATION_POLL_MS = 1000;
+let lastSeenHref = location.href;
+setInterval(() => {
+  if (location.href === lastSeenHref) return;
+  lastSeenHref = location.href;
+  onLocationChange();
+}, LOCATION_POLL_MS);
 
 function onLocationChange() {
   const slug = parseProblemSlug(location.href);
@@ -395,8 +436,10 @@ function onLocationChange() {
     session = null;
   }
   newSession(slug);
-  // Re-inject the page script for the new problem — Monaco may have
-  // been torn down and rebuilt.
+  // Re-inject in case the injector never loaded on this page. If one is
+  // already resident it bails immediately — re-hooking the same editor
+  // would post every keystroke twice. The snapshot for the new problem
+  // comes from the request in newSession(), not from re-hooking.
   injectPageScript();
 }
 
