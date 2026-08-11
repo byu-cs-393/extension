@@ -79,8 +79,23 @@ export async function refreshProgress(netID) {
 // ---- Rendering: dispatcher ----------------------------------------------
 
 // Returns an HTMLElement for a third card, or null if unrenderable.
-// `item` is a course.json performance item — types: "oa", "performance",
-// "peer-mock", "live-interview", "professional-mock", "final".
+//
+// `item` is a "performance item" — an entry from `schedule[N].performance`
+// in the professor's course.json, plus the gradeable refs course-data.js
+// promotes out of `schedule[N].other`. The name comes from his grading
+// categories, where Performance is worth 40% of the course:
+//
+//     Study 40% · Performance 40% · Final 20% · Extra Credit
+//
+// Note the word does double duty, which is a wart inherited from the
+// data: "performance" is both that CATEGORY and the `type` of one
+// specific assessment inside it (the performance exam). The array is also
+// slightly wider than its name — the Final lives there too, and its
+// category is "final".
+//
+// Handled types: "oa", "performance", "peer-mock", "live-interview",
+// "professional-mock", "final", "connect-with-class",
+// "instructor-interview".
 //
 // `progress` is the per-student progress doc for this week (or null).
 // `weekStatus` is "current" | "past" | "future".
