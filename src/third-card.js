@@ -44,6 +44,7 @@ import {
 import { requestSignoff, submitSelfRating } from "./assignment-progress.js";
 import { fillOaTemplate } from "./submission-templates.js";
 import { openSubmissionForm } from "./submission-form.js";
+import { describeCanvasError, canvasErrorHint } from "./lib/canvas-error.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
 
@@ -695,13 +696,10 @@ function appendCanvasSubmitRow(article, card, progress, ctx) {
       });
       if (result?.outcome !== "submitted") {
         console.error("[CS 393 Buddy] Canvas submit failed:", result);
+        const hint = canvasErrorHint(result);
         alert(
-          `Couldn't submit to Canvas.\n\n${
-            result?.canvasError ??
-            result?.reason ??
-            result?.outcome ??
-            "unknown error"
-          }`,
+          `Couldn't submit to Canvas.\n\n${describeCanvasError(result)}` +
+            (hint ? `\n\n${hint}` : ""),
         );
         btn.disabled = false;
         btn.textContent = originalText;

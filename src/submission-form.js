@@ -28,6 +28,7 @@
 import { patchDoc } from "./firestore.js";
 import { fillSubmissionTemplate } from "./submission-templates.js";
 import { ASSIGNMENT_PROGRESS_CACHE_KEY } from "./assignment-progress.js";
+import { describeCanvasError, canvasErrorHint } from "./lib/canvas-error.js";
 
 // ---- Field schemas per assignment ------------------------------------
 //
@@ -380,12 +381,13 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
       );
     });
     if (result?.outcome !== "submitted") {
-      const msg =
-        result?.canvasError ??
-        result?.reason ??
-        result?.outcome ??
-        "unknown error";
-      showError(errorBanner, `Couldn't submit to Canvas: ${msg}`);
+      console.error("[CS 393 Buddy] Canvas submit failed:", result);
+      const hint = canvasErrorHint(result);
+      showError(
+        errorBanner,
+        `Couldn't submit to Canvas: ${describeCanvasError(result)}` +
+          (hint ? `\n\n${hint}` : ""),
+      );
       submitBtn.disabled = false;
       submitBtn.textContent = originalLabel;
       return;
