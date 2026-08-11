@@ -3,12 +3,16 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Chrome extension client for CS 393 Buddy. Root package.json exists so we can run Vitest against the pure helpers in src/. Cloud Functions live in functions/ with their own package.json.",
+  "description": "Chrome extension client for CS 393 Buddy. Content scripts are bundled from src/content/ into src/ by scripts/build-content-scripts.js \u2014 run `npm run build` after editing them. Cloud Functions live in functions/ with their own package.json.",
   "scripts": {
+    "build": "node scripts/build-content-scripts.js",
+    "build:watch": "node scripts/build-content-scripts.js --watch",
+    "build:check": "node scripts/build-content-scripts.js --check",
     "test": "vitest",
     "test:run": "vitest run"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
     "vitest": "^2.1.0"
   }

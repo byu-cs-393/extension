@@ -5,6 +5,10 @@ name: test
 # contracts (submission templates, OA session, course-data parsers)
 # can't silently break.
 #
+# Also verifies the committed content-script bundles match src/content/,
+# so a forgotten `npm run build` fails here rather than silently shipping
+# code that doesn't match its source.
+#
 # Only the root package.json is exercised here — the extension's
 # pure-JS helpers live in src/ and are tested against those. The
 # Cloud Functions in functions/ have their own package.json but no
@@ -36,6 +40,15 @@ jobs:
         # `npm ci` respects package-lock.json exactly — reproducible
         # installs, faster than `npm install` for CI.
         run: npm ci
+
+      - name: Check bundled content scripts are current
+        # Content scripts are built from src/content/ into src/ and the
+        # output is committed, so the extension loads from src/ with no
+        # build step. That only stays honest if the committed bundles
+        # match their sources — otherwise a forgotten `npm run build`
+        # ships code nobody has read. Runs before the tests because a
+        # stale bundle is the more confusing failure to debug.
+        run: npm run build:check
 
       - name: Run tests
         run: npm run test:run

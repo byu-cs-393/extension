@@ -1,0 +1,478 @@
+// Content script — captures Monaco editor deltas + paste/copy/visibility
+// events on LeetCode problem pages, batches them, and writes to Firestore.
+//
+// Architecture:
+//   - keystroke-injector.js runs in the page's JS world (via <script src>)
+//     and reaches window.monaco. It postMessages deltas back to us.
+//   - This script (isolated world) listens for those messages, buffers
+//     them, and flushes to Firestore in chunks.
+//   - Paste/copy/visibility events are captured directly here — document
+//     events fire in both worlds.
+//
+// Data model:
+//   students/{netID}/keystrokeSessions/{sessionId}
+//     { sessionId, netID, problemSlug, problemTitle, startedAt,
+//       lastActivityAt, deltaCount, chunkCount, endReason? }
+//   students/{netID}/keystrokeSessions/{sessionId}/chunks/{chunkIndex}
+//     { chunkIndex, events: [{ t, kind, ... }] }
+//
+// A "session" = one continuous visit to one problem in one tab.
+// Navigating to a different problem starts a new session. Sessions
+// never span page loads.
+//
+// MV3 content scripts can't use module imports, so firebase config and
+// helpers are inlined (same pattern as leetcode-tracker.js).
+
+
+import { patchFirestoreDoc } from "../lib/firestore-rest.js";
+import {
+  parseProblemSlug,
+  getProblemTitle,
+  titleMatchesSlug,
+} from "../lib/problem-url.js";
+import { createLifecycleGuard } from "../lib/extension-lifecycle.js";
+
+// Flush cadence. 5s means at most 5s of typing is at risk if the tab
+// is closed uncleanly. Also flushed on visibilitychange → hidden.
+const FLUSH_INTERVAL_MS = 5_000;
+// Session ends after this much idle time. Next event starts a new one.
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const INJECTOR_MESSAGE_SOURCE = "cs393-keystroke";
+// Commands going the other way, content script → injector.
+const INJECTOR_COMMAND_SOURCE = "cs393-keystroke-cmd";
+
+// ---- Extension lifecycle -----------------------------------------------
+//
+// Reloading or updating the extension orphans every content script
+// already running in an open tab: chrome.* handles throw "Extension
+// context invalidated" and nothing can be written again from this page.
+//
+// That has to be handled loudly rather than swallowed. The buffer would
+// otherwise keep growing, every flush would fail and re-queue, and the
+// red recording badge would sit there claiming to record a session that
+// is going nowhere — a student could work for an hour on that promise.
+// Chrome auto-updates extensions, so this will happen to real students
+// mid-problem, not just to us reloading during development.
+
+let flushTimer = null;
+let locationTimer = null;
+
+const lifecycle = createLifecycleGuard(() => {
+  if (flushTimer !== null) clearInterval(flushTimer);
+  if (locationTimer !== null) clearInterval(locationTimer);
+  // Drop the buffer rather than hold events that can never be written.
+  session = null;
+  markBadgeStopped();
+  console.warn(
+    "[CS 393 Buddy] the extension was reloaded or updated — recording has " +
+      "STOPPED for this tab. Reload the page to start recording again.",
+  );
+});
+
+// ---- Session state -----------------------------------------------------
+
+let netID = null;
+let session = null; // { sessionId, slug, startedAt, chunkIndex, deltaCount, buffer, metadataWritten }
+
+function makeSessionId(slug, startedAt) {
+  // Include a short random suffix so two tabs on the same problem opened
+  // in the same ms don't collide.
+  const rand = Math.floor(Math.random() * 1e6).toString(36);
+  return `${slug}-${startedAt}-${rand}`;
+}
+
+function newSession(slug) {
+  const startedAt = Date.now();
+  const sessionId = makeSessionId(slug, startedAt);
+  session = {
+    sessionId,
+    slug,
+    // Best effort now; retried at metadata-write time if the DOM title
+    // hadn't caught up to this problem yet. See resolveSessionTitle.
+    problemTitle: getProblemTitle(document.title, slug),
+    titleVerified: titleMatchesSlug(document.title, slug),
+    startedAt,
+    chunkIndex: 0,
+    deltaCount: 0,
+    buffer: [],
+    metadataWritten: false,
+    lastActivityAt: startedAt,
+  };
+  console.log(`[CS 393 Buddy] keystroke session started: ${sessionId}`);
+  // Ask for a fresh baseline. On SPA navigation LeetCode swaps the model
+  // on the SAME editor instance, so nothing re-hooks and no snapshot
+  // would otherwise be emitted — leaving this session with no idea what
+  // the starter code was, and its replay starting from nothing.
+  requestSnapshots();
+  return session;
+}
+
+function requestSnapshots() {
+  window.postMessage(
+    { source: INJECTOR_COMMAND_SOURCE, type: "request-snapshot" },
+    "*",
+  );
+}
+
+// Metadata is written on the first flush, up to FLUSH_INTERVAL_MS after
+// the session began — by which point a title that was mid-navigation at
+// session start has usually settled. Only re-read if we didn't already
+// get a verified one, so navigating AWAY (document.title is the next
+// problem, session.slug is this one) can't downgrade a good title.
+function resolveSessionTitle(target) {
+  if (target.titleVerified) return target.problemTitle;
+  const retried = getProblemTitle(document.title, target.slug);
+  target.problemTitle = retried;
+  target.titleVerified = titleMatchesSlug(retried, target.slug);
+  return retried;
+}
+
+async function ensureSessionMetadata(target) {
+  if (!target || target.metadataWritten) return;
+  const path = `students/${netID}/keystrokeSessions/${target.sessionId}`;
+  try {
+    await patchFirestoreDoc(path, {
+      sessionId: target.sessionId,
+      netID,
+      problemSlug: target.slug,
+      problemTitle: resolveSessionTitle(target),
+      startedAt: target.startedAt,
+      lastActivityAt: target.lastActivityAt,
+      deltaCount: 0,
+      chunkCount: 0,
+      userAgent: navigator.userAgent,
+    });
+    target.metadataWritten = true;
+  } catch (error) {
+    if (lifecycle.failed(error)) return;
+    console.error("[CS 393 Buddy] keystroke session metadata write failed:", error);
+  }
+}
+
+// `target` is bound ONCE, at call time, and every line below uses it
+// instead of the module-level `session`.
+//
+// That distinction is the whole bug this signature fixes: onLocationChange
+// calls flushBuffer("navigate") WITHOUT awaiting it and then immediately
+// reassigns `session` to the next problem. Every line after the first
+// await used to read the module variable — so the outgoing problem's
+// buffered typing was silently dropped, and the rollup stamped the
+// INCOMING session with the outgoing one's endReason and counters.
+async function flushBuffer(endReason, target = session) {
+  if (!lifecycle.alive()) return;
+  if (!target) return;
+  if (target.buffer.length === 0 && !endReason) return;
+
+  await ensureSessionMetadata(target);
+
+  // Snapshot + clear buffer BEFORE the write so events during the
+  // write end up in the next chunk.
+  const events = target.buffer;
+  target.buffer = [];
+
+  if (events.length > 0) {
+    const chunkPath =
+      `students/${netID}/keystrokeSessions/${target.sessionId}` +
+      `/chunks/${String(target.chunkIndex).padStart(6, "0")}`;
+    try {
+      await patchFirestoreDoc(chunkPath, {
+        chunkIndex: target.chunkIndex,
+        writtenAt: Date.now(),
+        events,
+      });
+      target.chunkIndex += 1;
+      target.deltaCount += events.length;
+    } catch (error) {
+      if (lifecycle.failed(error)) return;
+      console.error("[CS 393 Buddy] keystroke chunk write failed:", error);
+      // Put the events back on the front of the buffer so we retry
+      // on the next flush. Safe only for transient failures — an
+      // invalidated context is handled above, or this would grow without
+      // bound behind a badge that still says "recording".
+      target.buffer = events.concat(target.buffer);
+      return;
+    }
+  }
+
+  // Metadata rollup. Best-effort — a failure here just means the
+  // session doc's lastActivityAt / counters get stale, but the chunks
+  // are still there and authoritative.
+  const sessionPath =
+    `students/${netID}/keystrokeSessions/${target.sessionId}`;
+  try {
+    const patch = {
+      lastActivityAt: target.lastActivityAt,
+      deltaCount: target.deltaCount,
+      chunkCount: target.chunkIndex,
+    };
+    if (endReason) patch.endReason = endReason;
+    if (endReason) patch.endedAt = Date.now();
+    await patchFirestoreDoc(sessionPath, patch);
+  } catch (error) {
+    if (lifecycle.failed(error)) return;
+    console.error("[CS 393 Buddy] keystroke session rollup failed:", error);
+  }
+}
+
+function pushEvent(event) {
+  if (lifecycle.invalidated()) return;
+  if (!session) {
+    const slug = parseProblemSlug(location.href);
+    if (!slug) return;
+    newSession(slug);
+  }
+  // Idle timeout: end the current session and start a fresh one if
+  // we've been quiet for too long.
+  if (Date.now() - session.lastActivityAt > IDLE_TIMEOUT_MS) {
+    // Same rule as navigation: name the outgoing session, because
+    // newSession() below reassigns `session` before the flush finishes.
+    flushBuffer("idle", session);
+    const slug = parseProblemSlug(location.href);
+    if (slug) newSession(slug);
+    else return;
+  }
+  session.lastActivityAt = Date.now();
+  session.buffer.push(event);
+}
+
+// Current URL as last acted on, shared by the page-world navigation
+// notice and the polling fallback below.
+let lastSeenHref = location.href;
+const LOCATION_POLL_MS = 1000;
+
+// ---- Injector bridge ---------------------------------------------------
+
+function injectPageScript() {
+  const scriptEl = document.createElement("script");
+  scriptEl.src = chrome.runtime.getURL("keystroke-injector.js");
+  scriptEl.onload = () => scriptEl.remove();
+  (document.head || document.documentElement).appendChild(scriptEl);
+}
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== INJECTOR_MESSAGE_SOURCE) return;
+
+  if (data.type === "delta") {
+    pushEvent({
+      kind: "delta",
+      t: data.t,
+      wallMs: Date.now(),
+      // Which Monaco instance this edit belongs to. LeetCode runs more
+      // than one; `offset` only means something relative to its own
+      // editor's document.
+      editorId: data.editorId ?? null,
+      offset: data.offset,
+      length: data.length,
+      text: data.text,
+    });
+  } else if (data.type === "snapshot") {
+    pushEvent({
+      kind: "snapshot",
+      t: data.t,
+      wallMs: Date.now(),
+      editorId: data.editorId ?? null,
+      text: data.text,
+      language: data.language,
+      lineCount: data.lineCount ?? null,
+      // "hook" | "model-change" | "flush" | "requested". The read side
+      // uses this to distinguish a baseline taken when the document
+      // genuinely changed from one taken speculatively at navigation.
+      reason: data.reason ?? null,
+    });
+  } else if (data.type === "navigated") {
+    // Page-world navigation notice. Synchronous with LeetCode's own
+    // pushState, so this beats the location poll and — crucially — beats
+    // Monaco swapping in the new problem's code.
+    if (data.href !== lastSeenHref) {
+      lastSeenHref = data.href;
+      onLocationChange();
+    }
+  } else if (
+    data.type === "editor-hooked" ||
+    data.type === "injector-loaded" ||
+    data.type === "injector-already-loaded"
+  ) {
+    console.log(`[CS 393 Buddy] injector: ${data.type}`);
+  }
+});
+
+// ---- Paste / copy / visibility listeners -------------------------------
+
+// Paste + copy DOM events give us the clipboard data directly, which
+// the Monaco delta stream doesn't (a paste shows up as a delta with a
+// text field, but there's no source hint).
+document.addEventListener(
+  "paste",
+  (event) => {
+    const text = event.clipboardData?.getData("text") ?? "";
+    pushEvent({
+      kind: "paste",
+      t: performance.now(),
+      wallMs: Date.now(),
+      length: text.length,
+      preview: text.slice(0, 200),
+    });
+  },
+  true,
+);
+
+document.addEventListener(
+  "copy",
+  (event) => {
+    const selection = event.clipboardData?.getData("text") ?? String(document.getSelection() ?? "");
+    pushEvent({
+      kind: "copy",
+      t: performance.now(),
+      wallMs: Date.now(),
+      length: selection.length,
+      preview: selection.slice(0, 200),
+    });
+  },
+  true,
+);
+
+document.addEventListener("visibilitychange", () => {
+  pushEvent({
+    kind: document.visibilityState === "hidden" ? "tab_blur" : "tab_focus",
+    t: performance.now(),
+    wallMs: Date.now(),
+  });
+  // Aggressive flush when the tab loses focus — that's the most common
+  // moment right before an unclean close.
+  if (document.visibilityState === "hidden") {
+    flushBuffer();
+  }
+});
+
+// beforeunload is unreliable in MV3 (service worker may not survive
+// long enough to complete the fetch), but we still try — the periodic
+// flush already means we lose at most FLUSH_INTERVAL_MS of typing.
+window.addEventListener("beforeunload", () => {
+  flushBuffer("unload");
+});
+
+// ---- SPA navigation (problem → problem) --------------------------------
+//
+// Detecting that the student moved to a different problem WITHOUT a page
+// load is the whole ballgame here: miss it and the next problem's edits
+// are appended to the previous problem's session, or dropped entirely.
+//
+// Three mechanisms, because the first two each have holes:
+//
+//   1. popstate — only fires for back/forward, not for in-app clicks.
+//   2. A patched history.pushState. Content scripts run in an ISOLATED
+//      world with their own JS globals, so patching pushState here does
+//      NOT intercept the page's own calls to it. It only catches calls
+//      made from another content script. Kept because it costs nothing
+//      and fires earlier than polling when it does apply.
+//   3. Polling location.href. Unglamorous and completely reliable — it
+//      doesn't care how the navigation happened (pushState,
+//      replaceState, or a framework router that bypasses both). This is
+//      the one actually load-bearing for LeetCode's own navigation.
+const origPushState = history.pushState;
+history.pushState = function (...args) {
+  origPushState.apply(this, args);
+  window.dispatchEvent(new Event("locationchange"));
+};
+
+// A second of latency is invisible next to a 5s flush interval, and any
+// edits in that window still land in the correct session — onLocationChange
+// flushes the outgoing one before opening the next.
+locationTimer = setInterval(() => {
+  if (lifecycle.invalidated()) return;
+  if (location.href === lastSeenHref) return;
+  lastSeenHref = location.href;
+  onLocationChange();
+}, LOCATION_POLL_MS);
+
+function onLocationChange() {
+  const slug = parseProblemSlug(location.href);
+  // If we drifted off a problem page entirely, end the session.
+  if (!slug) {
+    if (session) {
+      flushBuffer("navigate", session);
+      session = null;
+    }
+    return;
+  }
+  // Same problem → nothing to do.
+  if (session && session.slug === slug) return;
+  // Different problem → flush + close current, start fresh.
+  if (session) {
+    flushBuffer("navigate", session);
+    session = null;
+  }
+  newSession(slug);
+  // Re-inject in case the injector never loaded on this page. If one is
+  // already resident it bails immediately — re-hooking the same editor
+  // would post every keystroke twice. The snapshot for the new problem
+  // comes from the request in newSession(), not from re-hooking.
+  injectPageScript();
+}
+
+window.addEventListener("popstate", onLocationChange);
+window.addEventListener("locationchange", onLocationChange);
+
+// ---- Recording badge ---------------------------------------------------
+
+function mountBadge() {
+  if (document.getElementById("cs393-recording-badge")) return;
+  const badge = document.createElement("div");
+  badge.id = "cs393-recording-badge";
+  badge.setAttribute("aria-label", "CS 393 Buddy: keystroke recording active");
+  badge.style.cssText = [
+    "position: fixed",
+    "bottom: 12px",
+    "right: 12px",
+    "z-index: 2147483647",
+    "background: rgba(220, 38, 38, 0.92)",
+    "color: white",
+    "font: 500 12px/1.2 system-ui, -apple-system, sans-serif",
+    "padding: 6px 10px",
+    "border-radius: 6px",
+    "box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25)",
+    "pointer-events: none",
+    "user-select: none",
+  ].join("; ");
+  badge.textContent = "● CS 393 recording";
+  document.body.appendChild(badge);
+}
+
+// Turns the badge into a visible, honest "not recording any more" state.
+// The whole point of the badge is that a student can trust it, which
+// means it has to stop claiming to record the moment it can't.
+function markBadgeStopped() {
+  const badge = document.getElementById("cs393-recording-badge");
+  if (!badge) return;
+  badge.setAttribute(
+    "aria-label",
+    "CS 393 Buddy: recording stopped, reload the page",
+  );
+  badge.style.background = "rgba(120, 113, 108, 0.95)";
+  badge.textContent = "⏸ CS 393 recording stopped — reload page";
+}
+
+// ---- Bootstrap ---------------------------------------------------------
+
+(async () => {
+  const { netID: stored } = await chrome.storage.sync.get("netID");
+  if (!stored) {
+    console.log(
+      "[CS 393 Buddy] no netID set — skipping keystroke recording. Run onboarding first.",
+    );
+    return;
+  }
+  netID = stored;
+
+  console.log("[CS 393 Buddy] keystroke tracker active");
+
+  injectPageScript();
+  mountBadge();
+  // Kick off the first session if we're already on a problem page.
+  const slug = parseProblemSlug(location.href);
+  if (slug) newSession(slug);
+
+  flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL_MS);
+})();
