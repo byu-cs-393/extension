@@ -179,29 +179,105 @@ describe("fillConnectWithClassTemplate", () => {
 });
 
 describe("fillStudyTemplate", () => {
-  it("renders per-week problems with tags + hours + growth", () => {
+  const problem = (over = {}) => ({
+    title: "Two Sum",
+    tag: "required",
+    problemUrl: "https://leetcode.com/problems/two-sum/",
+    acceptedUrl: null,
+    solved: false,
+    ...over,
+  });
+
+  it("links accepted submissions for solved problems", () => {
     const body = fillStudyTemplate({
       problems: [
-        { url: "https://leetcode.com/problems/two-sum/", tag: "required" },
-        { url: "https://leetcode.com/problems/valid-sudoku/", tag: "in class" },
+        problem({
+          solved: true,
+          acceptedUrl: "https://leetcode.com/problems/two-sum/submissions/1046917577/",
+        }),
       ],
       collabHours: 4,
       collabWithWhom: "Alex + Sam",
       personalHours: 5,
       growthActions: "re-timed myself",
-      taReviewUrl: "https://leetcode.com/problems/two-sum/submissions/999/",
     });
-    expect(body).toContain('<a href="https://leetcode.com/problems/two-sum/">');
+    expect(body).toContain("Solved this week (1 of 1)");
+    expect(body).toContain(
+      '<a href="https://leetcode.com/problems/two-sum/submissions/1046917577/">',
+    );
     expect(body).toContain("(required)");
-    expect(body).toContain("(in class)");
     expect(body).toContain("<strong>Collaborative study:</strong> 4 hrs (with Alex + Sam)");
     expect(body).toContain("<strong>Personal study:</strong> 5 hrs");
-    expect(body).toContain('<a href="https://leetcode.com/problems/two-sum/submissions/999/">');
   });
 
-  it("handles a week with no required/in-class problems", () => {
+  it("separates unsolved problems and counts them", () => {
+    // The rubric grades "required and in class problems DONE", so a
+    // grader needs the denominator, not just a list of links.
+    const body = fillStudyTemplate({
+      problems: [
+        problem({ solved: true, acceptedUrl: "https://leetcode.com/problems/two-sum/submissions/1/" }),
+        problem({ title: "Valid Sudoku", tag: "in class" }),
+        problem({ title: "LRU Cache" }),
+      ],
+    });
+    expect(body).toContain("Solved this week (1 of 3)");
+    expect(body).toContain("Not solved this week (2 of 3)");
+    expect(body).toContain("Valid Sudoku");
+    expect(body).toContain("LRU Cache");
+  });
+
+  it("never passes off a problem URL as an accepted submission", () => {
+    // The professor's rubric is explicit: link the accepted submission,
+    // not the problem page. Silently substituting one for the other
+    // would look like proof of a solve and isn't.
+    const body = fillStudyTemplate({
+      problems: [problem({ solved: true, acceptedUrl: null })],
+    });
+    expect(body).toContain("no submission link captured");
+    expect(body).not.toContain("Solved this week (0 of 1)");
+  });
+
+  it("reports the extension's tracked time when there is any", () => {
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      trackedMs: 3 * 60 * 60 * 1000 + 12 * 60 * 1000,
+    });
+    expect(body).toContain("Time on LeetCode measured by the extension this week");
+    expect(body).toContain("3h 12m of active editing");
+  });
+
+  it("omits the tracked-time line when nothing was recorded", () => {
+    const body = fillStudyTemplate({ problems: [problem()], trackedMs: 0 });
+    expect(body).not.toContain("measured by the extension");
+  });
+
+  it("prints a points summary a grader can read off", () => {
+    const body = fillStudyTemplate({
+      problems: [
+        problem({ solved: true, acceptedUrl: "https://leetcode.com/problems/two-sum/submissions/1/" }),
+        problem({ title: "Valid Sudoku" }),
+      ],
+      collabHours: 4,
+      personalHours: 5,
+    });
+    // 4 collaborative + 2 of 4 problems + 5 personal
+    expect(body).toContain("Suggested points: 11 / 13");
+    expect(body).toContain("Collaborative study: <strong>4 / 4</strong>");
+    expect(body).toContain("Required + in-class problems: <strong>2 / 4</strong>");
+    expect(body).toContain("Personal study: <strong>5 / 5</strong>");
+  });
+
+  it("says the points are computed from self-reported hours", () => {
+    // The extension can count solves and measure editing time; it can't
+    // verify four hours of collaborative study happened.
+    const body = fillStudyTemplate({ problems: [problem()], collabHours: 4 });
+    expect(body).toMatch(/self-reported/i);
+    expect(body).toMatch(/adjust/i);
+  });
+
+  it("handles a week with no assigned problems", () => {
     const body = fillStudyTemplate({});
-    expect(body).toContain("(none assigned this week)");
+    expect(body).toContain("(none solved yet)");
   });
 });
 

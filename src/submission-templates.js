@@ -37,6 +37,7 @@ function escapeAttr(str) {
 // ---- Shared building blocks -------------------------------------------
 
 // Emit "<p><strong>Label:</strong> value</p>". Value gets HTML-escaped.
+import { studyPointsBreakdown } from "./lib/study-points.js";
 function pLabelValue(label, value) {
   return `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value ?? "")}</p>`;
 }
@@ -170,12 +171,22 @@ export function fillConnectWithClassTemplate({
   );
 }
 
-// Weekly Study. Per-week — the professor's build injects
-// `_weekly = (required, inclass)` at render time, so we take those as
-// params here. `problems` param: array of {url, tag} where tag is
-// "required" | "in class". The tag pattern matches the professor's
-// output of "  - {url} (required): " lines.
-// Ref: `_template_md`, `typ == "study"`.
+// Weekly Study.
+//
+// The professor's rubric (../course/weekly/README.md) is explicit that
+// each problem link must be the student's ACCEPTED SUBMISSION, not the
+// problem page — a problem URL proves nothing about whether they solved
+// it. So solved and unsolved problems are listed separately, and a
+// solved problem with no captured submission URL says so rather than
+// quietly falling back to the problem page.
+//
+// `problems`: [{ title, problemUrl, acceptedUrl, tag, solved }]
+//   tag is "required" | "in class"; acceptedUrl may be null even when
+//   solved (the tracker only captures the last ~20 submissions).
+//
+// `trackedMs` is the extension's own measure of active time on LeetCode
+// during the week, printed next to the self-reported hours so a grader
+// can compare the two.
 export function fillStudyTemplate({
   problems,
   collabHours,
@@ -183,46 +194,110 @@ export function fillStudyTemplate({
   personalHours,
   growthActions,
   taReviewUrl,
+  trackedMs,
 }) {
   const probs = Array.isArray(problems) ? problems : [];
-  const problemItems = probs.length
-    ? probs
-        .map((p) => {
-          const tag = p?.tag ? ` (${escapeHtml(p.tag)})` : "";
-          const url = p?.url;
-          if (!url) return `<li>${escapeHtml(p?.title ?? "")}${tag}</li>`;
-          return (
-            `<li><a href="${escapeAttr(url)}">${escapeHtml(url)}</a>${tag}</li>`
-          );
-        })
-        .join("")
-    : "<li>(none assigned this week)</li>";
+  const solved = probs.filter((p) => p?.solved);
+  const unsolved = probs.filter((p) => !p?.solved);
+
+  const solvedItems = solved.length
+    ? solved.map(problemListItem).join("")
+    : "<li>(none solved yet)</li>";
+
+  const unsolvedSection = unsolved.length
+    ? `<p><strong>Not solved this week (${unsolved.length} of ${probs.length}):</strong></p>` +
+      `<ul>${unsolved.map(problemListItem).join("")}</ul>`
+    : "";
+
   const collab =
     collabHours != null || collabWithWhom
       ? `${escapeHtml(String(collabHours ?? ""))} hrs${
           collabWithWhom ? ` (with ${escapeHtml(collabWithWhom)})` : ""
         }`
       : "";
+
+  const breakdown = studyPointsBreakdown({
+    collabHours,
+    personalHours,
+    solvedCount: solved.length,
+    totalCount: probs.length,
+  });
+
   return (
-    `<p><strong>Problems (accepted-submission URLs):</strong></p>` +
-    `<ul>${problemItems}</ul>` +
+    `<p><strong>Solved this week (${solved.length} of ${probs.length}) — accepted-submission URLs:</strong></p>` +
+    `<ul>${solvedItems}</ul>` +
+    unsolvedSection +
     pLabelValue("Collaborative study", collab) +
     pLabelValue("Personal study", personalHours != null ? `${personalHours} hrs` : "") +
+    trackedTimeLine(trackedMs) +
     pLabelValue(
       "For growth I did (mark any: re-timed / re-did without lookups / studied others' solutions / just finished / other)",
       growthActions,
     ) +
-    pLabelUrl("TA review request (paste the submission link)", taReviewUrl)
+    pLabelUrl("TA review request (paste the submission link)", taReviewUrl) +
+    pointsSummary(breakdown)
   );
 }
 
-// ---- Extra credit fillers ---------------------------------------------
-//
-// Professor's original templates include "post this in the Teams channel"
-// notes on some EC items — omitted here since those directives are for
-// the empty template, not the submission.
+function problemListItem(p) {
+  const tag = p?.tag ? ` <em>(${escapeHtml(p.tag)})</em>` : "";
+  const title = escapeHtml(p?.title ?? "");
+  const accepted = p?.acceptedUrl;
+  if (accepted) {
+    return (
+      `<li>${title}${tag} — ` +
+      `<a href="${escapeAttr(accepted)}">${escapeHtml(accepted)}</a></li>`
+    );
+  }
+  // Deliberately NOT falling back to the problem URL as if it were a
+  // submission. Saying the link is missing is more useful to a grader
+  // than a link that looks like proof and isn't.
+  const problemUrl = p?.problemUrl;
+  const link = problemUrl
+    ? ` — <a href="${escapeAttr(problemUrl)}">${escapeHtml(problemUrl)}</a>`
+    : "";
+  const note = p?.solved
+    ? " <em>(solved — no submission link captured; paste it here)</em>"
+    : "";
+  return `<li>${title}${tag}${link}${note}</li>`;
+}
 
-// Interview Ready Chrome Extension.
+function trackedTimeLine(trackedMs) {
+  if (!Number.isFinite(trackedMs) || trackedMs <= 0) return "";
+  return pLabelValue(
+    "Time on LeetCode measured by the extension this week",
+    `${formatTrackedDuration(trackedMs)} of active editing`,
+  );
+}
+
+function formatTrackedDuration(ms) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+// A grader-facing summary so the points can be read off rather than
+// recomputed. Explicitly labelled as computed from self-reported hours —
+// the extension can count solves and measure editing time, but it can't
+// verify that four reported hours of collaborative study happened.
+function pointsSummary(breakdown) {
+  const rows = breakdown.lines
+    .map(
+      (line) =>
+        `<li>${escapeHtml(line.label)}: <strong>${line.points} / ${line.max}</strong>` +
+        ` <em>(${escapeHtml(line.detail)})</em></li>`,
+    )
+    .join("");
+  return (
+    `<hr />` +
+    `<p><strong>Suggested points: ${breakdown.total} / ${breakdown.max}</strong></p>` +
+    `<ul>${rows}</ul>` +
+    `<p><em>Computed by CS 393 Buddy from the problems solved and the hours ` +
+    `reported above. Hours are self-reported — please adjust if the work ` +
+    `behind them doesn't hold up.</em></p>`
+  );
+}
+
 export function fillEcInterviewReadyTemplate({
   allGreen,
   totalProblemsSolved,

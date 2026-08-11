@@ -31,6 +31,7 @@ import {
   titleMatchesSlug,
 } from "../lib/problem-url.js";
 import { createLifecycleGuard } from "../lib/extension-lifecycle.js";
+import { MAX_ACTIVE_GAP_MS } from "../keystroke-analysis.js";
 
 // Flush cadence. 5s means at most 5s of typing is at risk if the tab
 // is closed uncleanly. Also flushed on visibilitychange → hidden.
@@ -94,6 +95,12 @@ function newSession(slug) {
     startedAt,
     chunkIndex: 0,
     deltaCount: 0,
+    // Running total of time the student was actually working, accrued in
+    // pushEvent. Computed here rather than derived from the events later
+    // because summing it on the read side means fetching every chunk of
+    // every session — thousands of documents to answer "how long did
+    // they work this week?".
+    activeMs: 0,
     buffer: [],
     metadataWritten: false,
     lastActivityAt: startedAt,
@@ -140,6 +147,7 @@ async function ensureSessionMetadata(target) {
       lastActivityAt: target.lastActivityAt,
       deltaCount: 0,
       chunkCount: 0,
+      activeMs: 0,
       userAgent: navigator.userAgent,
     });
     target.metadataWritten = true;
@@ -204,6 +212,7 @@ async function flushBuffer(endReason, target = session) {
       lastActivityAt: target.lastActivityAt,
       deltaCount: target.deltaCount,
       chunkCount: target.chunkIndex,
+      activeMs: Math.round(target.activeMs),
     };
     if (endReason) patch.endReason = endReason;
     if (endReason) patch.endedAt = Date.now();
@@ -231,8 +240,21 @@ function pushEvent(event) {
     if (slug) newSession(slug);
     else return;
   }
+  accrueActiveTime(Date.now());
   session.lastActivityAt = Date.now();
   session.buffer.push(event);
+}
+
+// Adds the gap since the previous event to the session's active total,
+// using the same rule as activeMs() in keystroke-analysis.js so the two
+// agree: gaps are capped (a long pause is thinking, an hour is not), and
+// time with the tab hidden doesn't count at all.
+function accrueActiveTime(nowMs) {
+  const previous = session.lastActivityAt;
+  if (Number.isFinite(previous) && document.visibilityState !== "hidden") {
+    const gap = nowMs - previous;
+    if (gap > 0) session.activeMs += Math.min(gap, MAX_ACTIVE_GAP_MS);
+  }
 }
 
 // Current URL as last acted on, shared by the page-world navigation

@@ -501,6 +501,38 @@ export function resolveProblemTitle(session) {
   return slugToTitle(slug);
 }
 
+// Total active time across sessions that started inside [startMs, endMs),
+// read from the `activeMs` the tracker records on each session doc.
+//
+// Deliberately reads session METADATA only. The same number could be
+// derived by folding every session's events, but that means fetching
+// thousands of chunk documents to answer one question the dashboard asks
+// on every render.
+//
+// Sessions captured before the tracker recorded activeMs contribute 0,
+// so this undercounts historical weeks rather than inventing a figure —
+// `trackedSessions` vs `sessions` lets a caller say so.
+export function trackedActiveMsInWindow(sessions, startMs, endMs) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return { activeMs: 0, sessions: 0, trackedSessions: 0 };
+  }
+  let activeMs = 0;
+  let count = 0;
+  let tracked = 0;
+  for (const session of sessions ?? []) {
+    const startedAt = session?.startedAt;
+    if (!Number.isFinite(startedAt) || startedAt < startMs || startedAt >= endMs) {
+      continue;
+    }
+    count += 1;
+    if (Number.isFinite(session.activeMs)) {
+      activeMs += session.activeMs;
+      tracked += 1;
+    }
+  }
+  return { activeMs, sessions: count, trackedSessions: tracked };
+}
+
 // ---- Cross-session aggregates ------------------------------------------
 
 // Total active time across many session summaries — "time spent on

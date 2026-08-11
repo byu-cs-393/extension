@@ -21,6 +21,7 @@ import {
   editorIdsIn,
   primaryEditorId,
   eventsForEditor,
+  trackedActiveMsInWindow,
   titleToSlug,
   slugToTitle,
   MAX_ACTIVE_GAP_MS,
@@ -649,5 +650,63 @@ describe("multiple Monaco editors", () => {
       { events: [type(0, "abc"), type(100, "de")] },
     ]);
     expect(summary.typing.insertedChars).toBe(5);
+  });
+});
+
+describe("trackedActiveMsInWindow", () => {
+  // Reads the activeMs the tracker records on each session doc, so a
+  // week total costs one collection read instead of every chunk of
+  // every session.
+  const session = (startedAt, activeMs) => ({ startedAt, activeMs });
+
+  it("sums sessions that started inside the window", () => {
+    const out = trackedActiveMsInWindow(
+      [session(T0, 60_000), session(T0 + 1000, 30_000)],
+      T0,
+      T0 + 5000,
+    );
+    expect(out.activeMs).toBe(90_000);
+    expect(out.sessions).toBe(2);
+  });
+
+  it("uses an inclusive start and exclusive end, like classifyWeek", () => {
+    const sessions = [session(T0, 1000), session(T0 + 5000, 1000)];
+    expect(trackedActiveMsInWindow(sessions, T0, T0 + 5000).activeMs).toBe(1000);
+    expect(trackedActiveMsInWindow(sessions, T0 + 5000, T0 + 6000).activeMs).toBe(1000);
+  });
+
+  it("ignores sessions outside the window", () => {
+    const out = trackedActiveMsInWindow([session(T0 - 1, 999)], T0, T0 + 1000);
+    expect(out.activeMs).toBe(0);
+    expect(out.sessions).toBe(0);
+  });
+
+  it("counts pre-activeMs sessions without inventing a figure", () => {
+    // Sessions recorded before the tracker wrote activeMs contribute 0.
+    // The counts let a caller say the number is partial rather than
+    // silently under-reporting.
+    const out = trackedActiveMsInWindow(
+      [session(T0, 60_000), { startedAt: T0 + 1 }],
+      T0,
+      T0 + 1000,
+    );
+    expect(out.activeMs).toBe(60_000);
+    expect(out.sessions).toBe(2);
+    expect(out.trackedSessions).toBe(1);
+  });
+
+  it("ignores sessions with no usable start time", () => {
+    const out = trackedActiveMsInWindow(
+      [{ activeMs: 5000 }, { startedAt: null, activeMs: 5000 }],
+      T0,
+      T0 + 1000,
+    );
+    expect(out.activeMs).toBe(0);
+  });
+
+  it("returns zeroes for a bad window or no sessions", () => {
+    expect(trackedActiveMsInWindow([], T0, T0 + 1).activeMs).toBe(0);
+    expect(trackedActiveMsInWindow(null, T0, T0 + 1).activeMs).toBe(0);
+    expect(trackedActiveMsInWindow([session(T0, 1)], null, T0).activeMs).toBe(0);
   });
 });

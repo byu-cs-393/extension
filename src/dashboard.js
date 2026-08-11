@@ -1,5 +1,6 @@
-import { fetchStudent } from "./firestore.js";
+import { fetchStudent, fetchCollection } from "./firestore.js";
 import { getRole } from "./auth.js";
+import { trackedActiveMsInWindow } from "./keystroke-analysis.js";
 import {
   getVisibleWeeks,
   getCardsForWeek,
@@ -45,6 +46,9 @@ let timerInterval = null;
 // without an async fetch mid-render.
 let currentOaShapes = {};
 let currentAssignmentProgress = {}; // { [assignmentId]: doc }
+// Keystroke session METADATA only — enough for per-week active time
+// without pulling every session's events.
+let currentKeystrokeSessions = [];
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -264,16 +268,31 @@ function createRecommendedCard(cards, status) {
     // Prefer per-submission URLs from the tracker/backstop; fall back
     // to the plain problem URL if we haven't seen a submission id yet.
     const solutionUrls = currentSolves?.solutions ?? {};
+    // The rubric wants ACCEPTED-SUBMISSION urls, so solved state and the
+    // captured submission link both travel with each problem. The
+    // template decides how to present them — a problem URL is not a
+    // stand-in for proof of a solve.
+    const solvedSet = solvedSlugsInWeek(cards, currentSolves);
     const problems = studyProblemsForWeek(cards).map((p) => {
       const slug = extractLeetcodeSlug(p.url);
-      const perSubmission = slug ? solutionUrls[slug] : null;
-      return { url: perSubmission ?? p.url, tag: p.tag, title: p.title };
+      return {
+        title: p.title,
+        tag: p.tag,
+        problemUrl: p.url,
+        acceptedUrl: slug ? solutionUrls[slug] ?? null : null,
+        solved: slug ? solvedSet.has(slug) : false,
+      };
     });
+    const tracked = trackedActiveMsInWindow(
+      currentKeystrokeSessions,
+      cards.startMs,
+      cards.endMs,
+    );
     appendCanvasSubmitAffordance(article, studyItem, studyProgress, {
       netID: currentNetID,
       weekNum: cards.week,
     }, {
-      extraSubmitData: { problems },
+      extraSubmitData: { problems, trackedMs: tracked.activeMs },
     });
   }
 
@@ -316,20 +335,35 @@ function createProblemItem(p, isSolved) {
 
 async function initWeeks(netID) {
   currentNetID = netID;
-  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa] =
-    await Promise.all([
-      getVisibleWeeks(),
-      getTopics(),
-      chrome.storage.local.get("solvedProblems"),
-      getCachedProgress(),
-      getCachedAssignmentProgress(),
-      getActive(),
-    ]);
+  const [
+    cards,
+    topics,
+    { solvedProblems },
+    progress,
+    assignmentProgress,
+    activeOa,
+    keystrokeSessions,
+  ] = await Promise.all([
+    getVisibleWeeks(),
+    getTopics(),
+    chrome.storage.local.get("solvedProblems"),
+    getCachedProgress(),
+    getCachedAssignmentProgress(),
+    getActive(),
+    // Session metadata only — one collection read, no chunk events.
+    // Best-effort: a student with no recorded sessions, or a read that
+    // fails, just means the study submission omits the tracked-time line.
+    fetchCollection(`students/${netID}/keystrokeSessions`).catch((err) => {
+      console.error("[CS 393 Buddy] failed to load keystroke sessions:", err);
+      return [];
+    }),
+  ]);
   currentCards = cards;
   currentSolves = solvedProblems ?? null;
   currentProgress = progress;
   currentAssignmentProgress = assignmentProgress;
   currentActiveOa = activeOa;
+  currentKeystrokeSessions = keystrokeSessions;
   // Preload runtime-shape OAs for every topic so the sync third-card
   // dispatcher can render OA cards without an async fetch mid-render.
   const oaEntries = await Promise.all(

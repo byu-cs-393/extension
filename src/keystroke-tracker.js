@@ -124,6 +124,9 @@
     };
   }
 
+  // src/keystroke-analysis.js
+  var MAX_ACTIVE_GAP_MS = 12e4;
+
   // src/content/keystroke-tracker.js
   var FLUSH_INTERVAL_MS = 5e3;
   var IDLE_TIMEOUT_MS = 15 * 60 * 1e3;
@@ -159,6 +162,12 @@
       startedAt,
       chunkIndex: 0,
       deltaCount: 0,
+      // Running total of time the student was actually working, accrued in
+      // pushEvent. Computed here rather than derived from the events later
+      // because summing it on the read side means fetching every chunk of
+      // every session — thousands of documents to answer "how long did
+      // they work this week?".
+      activeMs: 0,
       buffer: [],
       metadataWritten: false,
       lastActivityAt: startedAt
@@ -193,6 +202,7 @@
         lastActivityAt: target.lastActivityAt,
         deltaCount: 0,
         chunkCount: 0,
+        activeMs: 0,
         userAgent: navigator.userAgent
       });
       target.metadataWritten = true;
@@ -230,7 +240,8 @@
       const patch = {
         lastActivityAt: target.lastActivityAt,
         deltaCount: target.deltaCount,
-        chunkCount: target.chunkIndex
+        chunkCount: target.chunkIndex,
+        activeMs: Math.round(target.activeMs)
       };
       if (endReason) patch.endReason = endReason;
       if (endReason) patch.endedAt = Date.now();
@@ -253,8 +264,16 @@
       if (slug) newSession(slug);
       else return;
     }
+    accrueActiveTime(Date.now());
     session.lastActivityAt = Date.now();
     session.buffer.push(event);
+  }
+  function accrueActiveTime(nowMs) {
+    const previous = session.lastActivityAt;
+    if (Number.isFinite(previous) && document.visibilityState !== "hidden") {
+      const gap = nowMs - previous;
+      if (gap > 0) session.activeMs += Math.min(gap, MAX_ACTIVE_GAP_MS);
+    }
   }
   var lastSeenHref = location.href;
   var LOCATION_POLL_MS = 1e3;
