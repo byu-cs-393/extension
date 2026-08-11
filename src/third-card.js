@@ -99,9 +99,19 @@ export async function refreshProgress(netID) {
 //
 // `progress` is the per-student progress doc for this week (or null).
 // `weekStatus` is "current" | "past" | "future".
-// `ctx` bundles per-render context: { weekNum, netID, activeSession,
-//    solves, oaShapes: {topic → runtime OA} }. oaShapes is preloaded
-//    by dashboard.js so the OA renderer stays synchronous.
+// `ctx` (context) is everything a renderer might need that isn't the item
+// itself, bundled into one argument so adding a dependency doesn't change
+// this function's signature or every call site:
+//
+//    weekNum             which week is being rendered
+//    netID               whose dashboard this is — writes need it
+//    activeSession       the in-flight OA attempt, if any
+//    solves              { slug → solvedAtMs } for progress bars
+//    solutionUrls        { slug → accepted submission URL }
+//    oaShapes            { topic → runtime OA }, preloaded by the caller
+//                        so the OA renderer can stay synchronous
+//    assignmentProgress  { assignmentId → progress doc }, the source for
+//                        signoff status and canvasSubmittedAt
 export function createThirdCardSection(item, progress, weekStatus, ctx = {}) {
   if (!item || !item.type) return null;
   switch (item.type) {
