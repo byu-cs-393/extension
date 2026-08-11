@@ -142,14 +142,19 @@ export function createThirdCardSection(item, progress, weekStatus, ctx = {}) {
 // to the existing OA renderer using the pre-translated runtime shape
 // (loaded by the dashboard into ctx.oaShapes at bootstrap).
 function renderOaFromCourseItem(item, progress, weekStatus, ctx) {
-  const runtime = ctx?.oaShapes?.[item.topic];
-  if (!runtime) {
+  const oaShape = ctx?.oaShapes?.[item.topic];
+  if (!oaShape) {
+    // Not an error — the dashboard translates every topic's OA
+    // asynchronously at bootstrap, so the first render can land before
+    // they're ready. Return a placeholder card rather than null: null
+    // means "no card here", which would leave a gap and then shove the
+    // page down when the real one arrives.
     const article = makeCard();
     addTitle(article, item.title ?? "Online Assessment");
     addStatusLine(article, "Loading…");
     return article;
   }
-  return renderOnlineAssessment(runtime, progress, weekStatus, ctx);
+  return renderOnlineAssessment(oaShape, progress, weekStatus, ctx);
 }
 
 // ---- Renderers for new course.json types -------------------------------
