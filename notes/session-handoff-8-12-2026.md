@@ -171,9 +171,13 @@ scripts/shift-schedule-for-testing.js
 
 ## What a next session might do
 
-1. **Rehearse as a real enrolled student** (Andrew). The Aug 11 run was
-   a TA with a Test Student proxy, so `verifyStudent`'s roster check and
-   a real student's `canvasUserId` are still unexercised.
+1. **Rehearse as a real enrolled student.** The Aug 11 run was a TA with
+   Canvas's Test Student proxy, so `verifyStudent`'s roster check and a
+   real student's `canvasUserId` are still unexercised. Needs someone
+   with a **Student** enrollment in course 35464 — a teacher or TA
+   enrollment can't submit, which is the whole reason the TA account
+   needs the Test Student override. Enrolling a willing person as a
+   student for an afternoon is enough.
 2. **Extra-credit renderers** — the original task, still outstanding.
 3. **Calibrate the thresholds** against honest sessions.
 4. **Revert the schedule shift before Sep 3** (`node scripts/vendor-course.js`).
@@ -197,6 +201,7 @@ firebase deploy --only functions
 - Firebase project: `cs393-496021`
 - Canvas course: `35464` on `byu.instructure.com`
 - Instructor: Michael Reynolds (mtr26@byu.edu)
-- TAs: Jack Leonard + Andrew Cambridge
+- TA: Jack Leonard (jack684). The Aug 5 notes also listed a second
+  TA; unverified, so not repeated here.
 
 If any of this contradicts the code, trust the code and update this file.
