@@ -638,31 +638,43 @@ function addOaTitleRow(article, topic, timerContent, weekNum) {
 // forwards to the background service worker's submitCanvasAssignment
 // handler (which POSTs to the Cloud Function which POSTs to Canvas with
 // masquerade), then patches the progress doc with canvasSubmittedAt so
-// this button doesn't re-appear.
+// the card can show a receipt.
 //
 // One-click confirm per user preference (not fully auto): student
 // sees the button and decides when to submit.
 //
-// Idempotency: guarded by progress.canvasSubmittedAt. If set, we show
-// the receipt instead of the button. Firestore rules allow the student
-// to write additional fields on their own weekProgress doc.
+// Resubmitting is allowed, same as the other card types: Canvas keeps
+// every attempt and grades the most recent, so a later submission
+// supersedes the earlier one. Firestore rules allow the student to write
+// additional fields on their own weekProgress doc.
 function appendCanvasSubmitRow(article, card, progress, ctx) {
   if (!ctx?.netID || !card?.topic) return;
   const assignmentId = `oa-${card.topic}`;
 
-  if (progress?.canvasSubmittedAt) {
+  const submittedAt = progress?.canvasSubmittedAt ?? null;
+  const submitCount = Number.isFinite(progress?.canvasSubmitCount)
+    ? progress.canvasSubmitCount
+    : submittedAt
+      ? 1
+      : 0;
+
+  if (submittedAt) {
     const line = document.createElement("div");
     line.className = "card-detail canvas-submit-receipt";
-    line.textContent = `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
+    const times = submitCount > 1 ? ` · ${submitCount} submissions` : "";
+    line.textContent =
+      `✓ Submitted to Canvas · ${formatRelativeTime(submittedAt)}${times}`;
     article.appendChild(line);
-    return;
   }
 
   const actions = document.createElement("div");
   actions.className = "card-actions";
   const btn = document.createElement("button");
-  btn.className = "btn-primary";
-  btn.textContent = "Submit to Canvas";
+  btn.className = submittedAt ? "btn-secondary" : "btn-primary";
+  btn.textContent = submittedAt ? "Submit again" : "Submit to Canvas";
+  if (submittedAt) {
+    btn.title = "Sends a new submission to Canvas. It replaces this one for grading.";
+  }
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     const originalText = btn.textContent;
@@ -707,12 +719,16 @@ function appendCanvasSubmitRow(article, card, progress, ctx) {
       }
       // Patch the weekProgress doc + local cache so this card re-renders
       // as "✓ Submitted" without waiting for a Firestore refetch.
-      const submittedAt = Date.now();
+      // Named `now`, not `submittedAt`: the outer scope already binds
+      // `submittedAt` to the PREVIOUS submission's timestamp, which the
+      // button label and submit count read.
+      const now = Date.now();
       const newProgress = {
         ...(progress ?? {}),
         type: "onlineAssessment",
         weekNum: ctx.weekNum,
-        canvasSubmittedAt: submittedAt,
+        canvasSubmittedAt: now,
+        canvasSubmitCount: submitCount + 1,
         canvasSubmissionId: result.canvasSubmissionId ?? null,
       };
       try {
@@ -770,27 +786,51 @@ function todayIso() {
 export function appendCanvasSubmitAffordance(article, item, progress, ctx, opts = {}) {
   if (!ctx?.netID || !item?.assignmentId) return;
 
-  if (progress?.canvasSubmittedAt) {
+  const submittedAt = progress?.canvasSubmittedAt ?? null;
+  const submitCount = Number.isFinite(progress?.canvasSubmitCount)
+    ? progress.canvasSubmitCount
+    : submittedAt
+      ? 1
+      : 0;
+
+  if (submittedAt) {
     const line = document.createElement("div");
     line.className = "card-detail canvas-submit-receipt";
-    line.textContent = `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
+    const times = submitCount > 1 ? ` · ${submitCount} submissions` : "";
+    line.textContent =
+      `✓ Submitted to Canvas · ${formatRelativeTime(submittedAt)}${times}`;
     article.appendChild(line);
-    return;
   }
 
   const actions = document.createElement("div");
   actions.className = "card-actions";
   const btn = document.createElement("button");
-  btn.className = "btn-primary";
-  btn.textContent = "Submit to Canvas";
+  // Resubmitting is allowed. Canvas keeps every attempt and grades the
+  // most recent one, so a later submission supersedes the earlier one
+  // rather than duplicating it — which is what a student correcting
+  // their hours, or submitting again after solving more problems,
+  // actually wants.
+  btn.className = submittedAt ? "btn-secondary" : "btn-primary";
+  btn.textContent = submittedAt ? "Submit again" : "Submit to Canvas";
+  if (submittedAt) {
+    btn.title = "Sends a new submission to Canvas. It replaces this one for grading.";
+  }
   btn.addEventListener("click", () => {
     openSubmissionForm({
       type: item.type,
       assignmentId: item.assignmentId,
       weekNum: ctx.weekNum,
       netID: ctx.netID,
-      prefill: opts.prefill ?? {},
+      // Values from the last submission win over the computed defaults,
+      // so correcting one field doesn't mean retyping the rest.
+      // extraSubmitData is deliberately NOT reused — solved problems and
+      // tracked time are recomputed, which is the point of resubmitting.
+      prefill: {
+        ...(opts.prefill ?? {}),
+        ...(progress?.canvasSubmissionData ?? {}),
+      },
       extraSubmitData: opts.extraSubmitData ?? {},
+      isResubmission: Boolean(submittedAt),
     });
   });
   actions.appendChild(btn);

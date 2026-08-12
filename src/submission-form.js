@@ -223,6 +223,7 @@ export function openSubmissionForm({
   netID,
   prefill = {},
   extraSubmitData = {}, // fields to add to `data` at submit time that aren't in the form (e.g., study.problems[])
+  isResubmission = false,
   onSubmitted,
 }) {
   const schema = resolveSchema({ type, assignmentId });
@@ -239,6 +240,7 @@ export function openSubmissionForm({
     netID,
     prefill,
     extraSubmitData,
+    isResubmission,
     onSubmitted,
   });
   document.body.appendChild(mountedModal);
@@ -267,7 +269,19 @@ function buildModal(opts) {
   overlay.appendChild(panel);
 
   const title = el("h2", { className: "cs393-submit-title" }, schema.title);
+  // Resubmitting is allowed, but the student should know what it does:
+  // Canvas keeps every attempt and grades the newest, so this replaces
+  // the previous one rather than adding to it.
+  const resubmitNote = opts.isResubmission
+    ? el(
+        "p",
+        { className: "cs393-submit-resubmit-note" },
+        "You've already submitted this. Sending again replaces your previous " +
+          "submission for grading — your answers below are filled in from last time.",
+      )
+    : null;
   panel.appendChild(title);
+  if (resubmitNote) panel.appendChild(resubmitNote);
 
   const errorBanner = el("div", { className: "cs393-submit-error", hidden: true });
   panel.appendChild(errorBanner);
@@ -286,7 +300,11 @@ function buildModal(opts) {
   const actions = el("div", { className: "cs393-submit-actions" });
   const cancelBtn = el("button", { type: "button", className: "cs393-btn-secondary" }, "Cancel");
   cancelBtn.addEventListener("click", closeModal);
-  const submitBtn = el("button", { type: "submit", className: "cs393-btn-primary" }, "Submit to Canvas");
+  const submitBtn = el(
+    "button",
+    { type: "submit", className: "cs393-btn-primary" },
+    opts.isResubmission ? "Replace submission" : "Submit to Canvas",
+  );
   actions.append(cancelBtn, submitBtn);
   form.appendChild(actions);
 
@@ -344,18 +362,23 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
   const originalLabel = submitBtn.textContent;
   submitBtn.textContent = "Submitting…";
   try {
-    // Collect form values into a plain data object.
-    const data = { ...extraSubmitData };
+    // Collect form values. fieldValues is what the student typed;
+    // extraSubmitData is computed (solved problems, tracked time) and is
+    // deliberately kept separate — only the typed values are worth
+    // storing to prefill a resubmission, and the computed ones must be
+    // recalculated each time.
+    const fieldValues = {};
     const formData = new FormData(form);
     for (const field of schema.fields) {
       const raw = formData.get(field.name);
       // Numbers come out as strings — coerce.
       if (field.type === "number" && raw != null && raw !== "") {
-        data[field.name] = Number(raw);
+        fieldValues[field.name] = Number(raw);
       } else {
-        data[field.name] = raw ?? "";
+        fieldValues[field.name] = raw ?? "";
       }
     }
+    const data = { ...extraSubmitData, ...fieldValues };
 
     const submissionType = schema.submissionType ?? "online_text_entry";
     let payload;
@@ -398,19 +421,33 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
     // future clicks.
     const submittedAt = Date.now();
     const progressType = progressTypeFor({ type, assignmentId });
-    const newProgress = {
-      assignmentId,
-      type: progressType,
-      canvasSubmittedAt: submittedAt,
-      canvasSubmissionId: result.canvasSubmissionId ?? null,
-      ...(Number.isFinite(weekNum) ? { weekNum } : {}),
-    };
     try {
-      await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newProgress);
+      // Read the cached doc BEFORE writing, both to carry forward fields
+      // this form doesn't own (signoff status) and to know how many times
+      // this has been submitted already.
       const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
       const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
-      // Merge with any existing progress fields (e.g., signoff status).
       const existing = bundle.progress?.[assignmentId] ?? {};
+      const priorCount = Number.isFinite(existing.canvasSubmitCount)
+        ? existing.canvasSubmitCount
+        : existing.canvasSubmittedAt
+          ? 1
+          : 0;
+
+      const newProgress = {
+        assignmentId,
+        type: progressType,
+        canvasSubmittedAt: submittedAt,
+        canvasSubmissionId: result.canvasSubmissionId ?? null,
+        canvasSubmitCount: priorCount + 1,
+        // What the student typed, so a resubmission can prefill from it.
+        // Not the rendered body — that's Canvas's copy, and storing HTML
+        // here would only go stale against the template.
+        canvasSubmissionData: fieldValues,
+        ...(Number.isFinite(weekNum) ? { weekNum } : {}),
+      };
+
+      await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newProgress);
       bundle.progress = {
         ...(bundle.progress ?? {}),
         [assignmentId]: { ...existing, ...newProgress },
@@ -488,6 +525,16 @@ function ensureStyles() {
       padding: 24px 28px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
       font: 14px/1.4 system-ui, -apple-system, sans-serif;
+    }
+    .cs393-submit-resubmit-note {
+      margin: 0 0 12px 0;
+      padding: 8px 10px;
+      background: #fffbeb;
+      border-left: 3px solid #f59e0b;
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #92400e;
     }
     .cs393-submit-title {
       margin: 0 0 16px; font-size: 18px; font-weight: 600;
