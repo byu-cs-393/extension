@@ -156,7 +156,7 @@
   "schedule": [
     {
       "week": 1,
-      "dates": "Jul 30–Aug 2",
+      "dates": "Sep 2–5",
       "topic": "data-structures",
       "half": true,
       "study": true,
@@ -177,7 +177,7 @@
     },
     {
       "week": 2,
-      "dates": "Aug 4–9",
+      "dates": "Sep 7–12",
       "topic": "data-structures",
       "study": true,
       "performance": [
@@ -192,7 +192,7 @@
     },
     {
       "week": 3,
-      "dates": "Aug 11–16",
+      "dates": "Sep 14–19",
       "topic": "data-structures",
       "study": true,
       "performance": [
@@ -207,7 +207,7 @@
     },
     {
       "week": 4,
-      "dates": "Aug 18–23",
+      "dates": "Sep 21–26",
       "topic": "graphs",
       "study": true,
       "performance": [
@@ -226,7 +226,7 @@
     },
     {
       "week": 5,
-      "dates": "Aug 25–30",
+      "dates": "Sep 28–Oct 3",
       "topic": "graphs",
       "study": true,
       "performance": [
@@ -241,7 +241,7 @@
     },
     {
       "week": 6,
-      "dates": "Sep 1–6",
+      "dates": "Oct 5–10",
       "topic": "graphs",
       "study": true,
       "performance": [
@@ -256,7 +256,7 @@
     },
     {
       "week": 7,
-      "dates": "Sep 8–13",
+      "dates": "Oct 12–17",
       "topic": "dynamic-programming",
       "study": true,
       "performance": [
@@ -274,7 +274,7 @@
     },
     {
       "week": 8,
-      "dates": "Sep 15–20",
+      "dates": "Oct 19–24",
       "topic": "dynamic-programming",
       "study": true,
       "performance": [
@@ -285,7 +285,7 @@
     },
     {
       "week": 9,
-      "dates": "Sep 22–27",
+      "dates": "Oct 26–31",
       "topic": "dynamic-programming",
       "study": true,
       "performance": [
@@ -300,7 +300,7 @@
     },
     {
       "week": 10,
-      "dates": "Sep 29–Oct 4",
+      "dates": "Nov 2–7",
       "topic": "dynamic-programming",
       "study": true,
       "performance": [
@@ -322,7 +322,7 @@
     },
     {
       "week": 11,
-      "dates": "Oct 6–11",
+      "dates": "Nov 9–14",
       "topic": "sorting-two-pointer",
       "study": true,
       "performance": [
@@ -334,7 +334,7 @@
     },
     {
       "week": 12,
-      "dates": "Oct 13–18",
+      "dates": "Nov 16–21",
       "topic": "sorting-two-pointer",
       "study": true,
       "performance": [
@@ -349,7 +349,7 @@
     },
     {
       "week": 13,
-      "dates": "Oct 20–21",
+      "dates": "Nov 23–24",
       "topic": "sorting-two-pointer",
       "thanksgiving": true,
       "study": true,
@@ -362,7 +362,7 @@
     },
     {
       "week": 14,
-      "dates": "Oct 27–Nov 1",
+      "dates": "Nov 30–Dec 5",
       "study": true,
       "performance": [
         {
@@ -372,7 +372,7 @@
     },
     {
       "week": 15,
-      "dates": "Nov 3–8",
+      "dates": "Dec 7–12",
       "review": true,
       "performance": [
         {
@@ -384,7 +384,7 @@
     {
       "id": "finals",
       "label": "Finals",
-      "dates": "Fri Nov 13, 7–10 am",
+      "dates": "Thu Dec 17, 7–10 am",
       "performance": [
         {
           "type": "final",
