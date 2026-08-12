@@ -1,3 +1,8 @@
+> **SUPERSEDED — see `session-handoff-8-12-2026.md`.**
+> Kept for history. Most details below are now wrong: this predates
+> the keystroke/replay work, the content-script build step, and 248
+> of the 336 tests.
+
 # Session handoff — 2026-08-05
 
 Written so a fresh Claude Code session (or a new dev sitting down cold)
