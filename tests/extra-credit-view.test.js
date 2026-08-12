@@ -7,12 +7,13 @@
 // and that submitting again targets the NEXT slot rather than
 // overwriting the one they just filled.
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { renderExtraCreditSection } from "../src/extra-credit-view.js";
+// Imported rather than read off disk: under the jsdom environment
+// `import.meta.url` isn't a file: URL, so `new URL(..., import.meta.url)`
+// throws at module scope and the whole suite is skipped without a single
+// test failing.
+import COURSE from "../src/course.json";
 
-const COURSE = JSON.parse(
-  readFileSync(new URL("../src/course.json", import.meta.url), "utf8"),
-);
 const ASSIGNMENTS = COURSE.assignments;
 
 const submitted = (over = {}) => ({
@@ -30,14 +31,18 @@ beforeEach(() => {
   openForm = vi.fn();
 });
 
-const render = (assignmentProgress = {}, over = {}) =>
-  renderExtraCreditSection(container, {
+// Clears first: rendering twice into the same container would append a
+// second set of cards, and every lookup below would find the stale one.
+const render = (assignmentProgress = {}, over = {}) => {
+  container.innerHTML = "";
+  return renderExtraCreditSection(container, {
     assignments: ASSIGNMENTS,
     assignmentProgress,
     netID: "jack684",
     openForm,
     ...over,
   });
+};
 
 const $ = (sel) => container.querySelector(sel);
 const $$ = (sel) => [...container.querySelectorAll(sel)];
