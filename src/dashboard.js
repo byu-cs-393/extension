@@ -288,6 +288,16 @@ function createRecommendedCard(cards, status) {
       cards.startMs,
       cards.endMs,
     );
+    if (tracked.sessions > 0 && tracked.trackedSessions === 0) {
+      // Distinguishes "no sessions this week" from "sessions exist but
+      // predate the tracker recording activeMs" — otherwise the missing
+      // line looks identical in both cases.
+      console.warn(
+        `[CS 393 Buddy] week ${cards.week}: ${tracked.sessions} keystroke ` +
+          "session(s) found but none record activeMs — recorded before " +
+          "per-session timing was added. Re-record to get tracked time.",
+      );
+    }
     appendCanvasSubmitAffordance(article, studyItem, studyProgress, {
       netID: currentNetID,
       weekNum: cards.week,
@@ -330,6 +340,31 @@ function createProblemItem(p, isSolved) {
   }
   return li;
 }
+
+// Re-reads keystroke session metadata and re-renders.
+//
+// Sessions are written by a content script in a different tab, so
+// nothing in this page's storage changes when one is recorded — the
+// bootstrap fetch would otherwise be the only read this page ever does.
+async function refreshKeystrokeSessions() {
+  if (!currentNetID) return;
+  try {
+    currentKeystrokeSessions = await fetchCollection(
+      `students/${currentNetID}/keystrokeSessions`,
+    );
+    renderWeeks();
+  } catch (err) {
+    // Best-effort: a failure just means the tracked-time line falls back
+    // to whatever was already loaded.
+    console.error("[CS 393 Buddy] failed to refresh keystroke sessions:", err);
+  }
+}
+
+// Coming back to this tab is the other moment the sessions are likely
+// stale — the student went and solved something in another tab.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshKeystrokeSessions();
+});
 
 // ---- Bootstrap + storage listener -------------------------------------
 
@@ -466,6 +501,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentSolves = changes.solvedProblems.newValue ?? null;
     needsRender = true;
     maybeAutoPass();
+    // A solve landing means the student was just on LeetCode, so their
+    // keystroke sessions have moved on too. Without this the tracked
+    // time in a Weekly Study submission is whatever it was when the
+    // dashboard tab was opened — usually before any of the week's work.
+    refreshKeystrokeSessions();
   }
   if (changes.weekProgressBundle) {
     currentProgress = changes.weekProgressBundle.newValue?.progress ?? {};
