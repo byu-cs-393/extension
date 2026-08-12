@@ -9,7 +9,8 @@
     "build:watch": "node scripts/build-content-scripts.js --watch",
     "build:check": "node scripts/build-content-scripts.js --check",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "ci": "npm run build:check && npm run test:run"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
