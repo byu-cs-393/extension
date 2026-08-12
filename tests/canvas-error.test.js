@@ -54,6 +54,28 @@ describe("describeCanvasError", () => {
     );
   });
 
+  it("drops a recognised error whose message is blank", () => {
+    // {message: "   "} is a shape we understand that carries nothing.
+    // Rendering it as JSON would crowd out the real errors beside it.
+    const result = {
+      canvasError: [
+        { message: "user not authorized to perform that action" },
+        { message: "   " },
+        null,
+        { message: "assignment is locked" },
+      ],
+    };
+    expect(describeCanvasError(result)).toBe(
+      "user not authorized to perform that action; assignment is locked",
+    );
+  });
+
+  it("returns unknown error when every entry is blank", () => {
+    expect(describeCanvasError({ canvasError: [{ message: "" }, { message: " " }] })).toBe(
+      "unknown error",
+    );
+  });
+
   it("shows the JSON for an unrecognised shape rather than [object Object]", () => {
     const text = describeCanvasError({ canvasError: { weird: 1 } });
     expect(text).toBe('{"weird":1}');

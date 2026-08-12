@@ -25,12 +25,17 @@ function messageFrom(node) {
   if (typeof node === "object") {
     // Canvas uses `message`; some endpoints use `description`. `base` is
     // where it puts errors that aren't tied to a specific field.
+    const recognised = "message" in node || "description" in node;
     const direct = node.message ?? node.description ?? null;
     if (typeof direct === "string" && direct.trim()) return direct.trim();
     const nested = node.errors ?? node.base ?? null;
     if (nested != null) return messageFrom(nested);
-    // Unrecognised object — show the JSON rather than "[object Object]",
-    // so at least the shape is visible when someone reports it.
+    // A shape we DO understand whose message is blank carries nothing —
+    // drop it, so it doesn't crowd out the real errors beside it in the
+    // joined output.
+    if (recognised) return null;
+    // Genuinely unrecognised — show the JSON rather than "[object
+    // Object]", so at least the shape is visible when someone reports it.
     try {
       const json = JSON.stringify(node);
       return json && json !== "{}" ? json : null;
