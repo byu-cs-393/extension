@@ -575,3 +575,58 @@ body {
   color: var(--text-tertiary);
   letter-spacing: 0.05em;
 }
+
+/* ---- Extra credit section (full-course page) --------------------------
+   Extra credit isn't tied to a week, so it gets its own section below
+   the weeks. Deliberately quieter than the week cards: it's optional,
+   and shouldn't read as work the student is behind on. */
+
+.ec-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--divider);
+}
+
+.ec-heading {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.ec-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 16px 0;
+}
+
+.ec-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.ec-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ec-card-head .card-title {
+  margin-bottom: 0;
+}
+
+.ec-points {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.ec-unavailable {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  line-height: 1.5;
+}

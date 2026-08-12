@@ -13,6 +13,7 @@ import {
   solvedSlugsInWeek,
   flattenPlacementsToProblems,
   getOaRuntimeShape,
+  getAssignments,
   getTopics,
 } from "./course-data.js";
 import {
@@ -26,6 +27,7 @@ import {
   ASSIGNMENT_PROGRESS_CACHE_KEY,
 } from "./assignment-progress.js";
 import { getActive, OA_SESSION_KEY } from "./oa-session.js";
+import { renderExtraCreditSection } from "./extra-credit-view.js";
 
 // Module-scoped state — render() reads from these.
 let currentCards = [];
@@ -35,6 +37,10 @@ let currentActiveOa = null;
 let currentNetID = null;
 let currentOaShapes = {};
 let currentAssignmentProgress = {};
+// The full assignments[] list from course.json — extra credit lives
+// there and nowhere in schedule[], so it can't be reached via the week
+// cards like every other card type.
+let currentAssignments = [];
 
 const SHORT_DATE = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 
@@ -54,15 +60,22 @@ function renderWeeks() {
     empty.className = "weeks-empty";
     empty.textContent = "No weeks in the course.";
     container.appendChild(empty);
-    return;
+  } else {
+    // Newest-first so the current week sits near the top (matches dashboard).
+    const now = Date.now();
+    const sorted = [...currentCards].sort((a, b) => b.week - a.week);
+    for (const cards of sorted) {
+      container.appendChild(createWeekSection(cards, classifyWeek(cards, now)));
+    }
   }
 
-  // Newest-first so the current week sits near the top (matches dashboard).
-  const now = Date.now();
-  const sorted = [...currentCards].sort((a, b) => b.week - a.week);
-  for (const cards of sorted) {
-    container.appendChild(createWeekSection(cards, classifyWeek(cards, now)));
-  }
+  // Extra credit last — it belongs to no week, and it's optional, so it
+  // shouldn't sit above the work that isn't.
+  renderExtraCreditSection(container, {
+    assignments: currentAssignments,
+    assignmentProgress: currentAssignmentProgress,
+    netID: currentNetID,
+  });
 }
 
 function createWeekSection(cards, status) {
@@ -280,7 +293,7 @@ function createProblemItem(p, isSolved) {
 
 async function init(netID) {
   currentNetID = netID;
-  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa] =
+  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa, assignments] =
     await Promise.all([
       getAllScheduleCards(),
       getTopics(),
@@ -288,8 +301,10 @@ async function init(netID) {
       getCachedProgress(),
       getCachedAssignmentProgress(),
       getActive(),
+      getAssignments(),
     ]);
   currentCards = cards;
+  currentAssignments = assignments;
   currentSolves = solvedProblems ?? null;
   currentProgress = progress;
   currentAssignmentProgress = assignmentProgress;
