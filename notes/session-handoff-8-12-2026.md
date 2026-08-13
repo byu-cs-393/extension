@@ -138,12 +138,17 @@ scripts/shift-schedule-for-testing.js
 ## Gotchas
 
 - **Don't edit `src/keystroke-tracker.js` et al.** — generated. See above.
+- **Enable the pre-commit hook once per clone:**
+  `git config core.hooksPath .githooks`. It blocks committing a
+  testing-shifted `src/course.json` — see below.
 - **`src/course.json` is vendored AND gets shifted for testing.**
   `scripts/shift-schedule-for-testing.js` moves every date so a chosen
   week contains today, because before Sep 3 every week reads as "future"
   and the dashboard is empty. It leaves the file modified-but-uncommitted
-  by design. **It has been committed by accident twice** via `git add -A`
-  — check `git status` before staging. Revert with
+  by design. **It has been committed by accident four times** via
+  `git add -A`. Two guards now: the pre-commit hook above (checks the
+  staged blob, silent unless course.json is in the commit) and
+  `npm run check:course` in CI. Revert with
   `node scripts/vendor-course.js`.
 - **`students/{netID}.canvasUserId` for a TA must point at Test Student
   (169685), not their real Canvas id.** Canvas rejects a masqueraded

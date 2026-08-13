@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# Blocks committing a testing-shifted src/course.json.
+#
+# scripts/shift-schedule-for-testing.js rewrites every date so a chosen
+# week contains today. The working copy is meant to stay shifted while
+# testing — this only inspects what's actually STAGED, so it's silent
+# unless course.json is going into the commit.
+#
+# It has been swept in by `git add -A` four times. CI catches it, but only
+# after the fact; this catches it before the commit exists.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+
+if git diff --cached --name-only | grep -q '^src/course\.json$'; then
+  staged=$(mktemp)
+  git show :src/course.json > "$staged"
+  if ! node scripts/check-vendored-course.js --file "$staged"; then
+    rm -f "$staged"
+    echo
+    echo "src/course.json is staged with testing dates. To commit everything else:"
+    echo "    git restore --staged src/course.json"
+    exit 1
+  fi
+  rm -f "$staged"
+fi

@@ -31,7 +31,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const VENDORED = join(ROOT, "src", "course.json");
+// --file lets the pre-commit hook check the STAGED blob rather than the
+// working tree, which is the whole point: the working copy is shifted on
+// purpose while testing, and only what's about to be committed matters.
+const fileArg = process.argv.indexOf("--file");
+const VENDORED =
+  fileArg === -1 ? join(ROOT, "src", "course.json") : process.argv[fileArg + 1];
 const UPSTREAM = join(ROOT, "..", "course", "data", "course.json");
 
 const MONTHS = {
