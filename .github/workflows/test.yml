@@ -41,13 +41,17 @@ jobs:
         # installs, faster than `npm install` for CI.
         run: npm ci
 
-      - name: Check bundled content scripts are current
+      - name: Check bundled content scripts and runtime paths
         # Content scripts are built from src/content/ into src/ and the
         # output is committed, so the extension loads from src/ with no
         # build step. That only stays honest if the committed bundles
         # match their sources — otherwise a forgotten `npm run build`
         # ships code nobody has read. Runs before the tests because a
         # stale bundle is the more confusing failure to debug.
+        #
+        # Also resolves every path manifest.json and the HTML files load
+        # at runtime. Nothing else checks those: a wrong one doesn't throw,
+        # Chrome just never loads that content script.
         run: npm run build:check
 
       - name: Run tests
