@@ -10,7 +10,7 @@ import {
   attemptPassed,
   getRemainingMs,
   formatRemaining,
-} from "../src/oa-session.js";
+} from "../src/data/oa-session.js";
 
 describe("solvedInWindow", () => {
   const attempt = {

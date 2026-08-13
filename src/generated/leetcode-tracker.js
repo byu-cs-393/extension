@@ -3,7 +3,7 @@
 // Edit the source there and run: npm run build
 
 (() => {
-  // src/firebase-config.js
+  // src/platform/firebase-config.js
   var firebaseConfig = {
     apiKey: "AIzaSyC2RxnVrQii0rT-Tm3JZmURmHzico-VqDg",
     authDomain: "cs393-496021.firebaseapp.com",

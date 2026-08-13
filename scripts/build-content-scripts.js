@@ -34,8 +34,9 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
 const CONTENT = join(SRC, "content");
+const OUT = join(SRC, "generated");
 
-// entry (in src/content/) -> output (in src/, where the manifest points)
+// entry (in src/content/) -> output (in src/generated/, where the manifest points)
 export const CONTENT_SCRIPTS = [
   "keystroke-tracker",
   "keystroke-injector",
@@ -52,7 +53,7 @@ const BANNER = `// GENERATED FILE — DO NOT EDIT.
 function optionsFor(name) {
   return {
     entryPoints: [join(CONTENT, `${name}.js`)],
-    outfile: join(SRC, `${name}.js`),
+    outfile: join(OUT, `${name}.js`),
     bundle: true,
     // IIFE keeps every binding out of the shared isolated-world scope.
     // Content scripts from one extension share ONE global scope on a
@@ -89,7 +90,7 @@ async function watchAll() {
 async function checkAll() {
   let stale = false;
   for (const name of CONTENT_SCRIPTS) {
-    const outfile = join(SRC, `${name}.js`);
+    const outfile = join(OUT, `${name}.js`);
     if (!existsSync(outfile)) {
       console.error(`  MISSING  ${name}.js — run npm run build`);
       stale = true;
@@ -126,5 +127,5 @@ if (args.includes("--watch")) {
   await checkAll();
 } else {
   await buildAll();
-  console.log(`Built ${CONTENT_SCRIPTS.length} content scripts into src/.`);
+  console.log(`Built ${CONTENT_SCRIPTS.length} content scripts into src/generated/.`);
 }

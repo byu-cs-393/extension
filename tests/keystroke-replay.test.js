@@ -16,7 +16,7 @@ import {
   stepIndexAtPlaybackMs,
   KEYFRAME_INTERVAL,
   LEAD_IN_MS,
-} from "../src/keystroke-replay.js";
+} from "../src/data/keystroke-replay.js";
 
 const T0 = 1_756_900_000_000;
 const EDITOR = "sol";

@@ -31,7 +31,7 @@ import {
   titleMatchesSlug,
 } from "../lib/problem-url.js";
 import { createLifecycleGuard } from "../lib/extension-lifecycle.js";
-import { MAX_ACTIVE_GAP_MS } from "../keystroke-analysis.js";
+import { MAX_ACTIVE_GAP_MS } from "../data/keystroke-analysis.js";
 
 // Flush cadence. 5s means at most 5s of typing is at risk if the tab
 // is closed uncleanly. Also flushed on visibilitychange → hidden.

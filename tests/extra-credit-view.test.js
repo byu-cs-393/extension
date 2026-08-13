@@ -7,7 +7,7 @@
 // and that submitting again targets the NEXT slot rather than
 // overwriting the one they just filled.
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderExtraCreditSection } from "../src/extra-credit-view.js";
+import { renderExtraCreditSection } from "../src/ui/extra-credit-view.js";
 // Imported rather than read off disk: under the jsdom environment
 // `import.meta.url` isn't a file: URL, so `new URL(..., import.meta.url)`
 // throws at module scope and the whole suite is skipped without a single

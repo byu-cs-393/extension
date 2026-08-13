@@ -16,7 +16,7 @@ import {
   fillEcFriendInterviewTemplate,
   fillEcFriendOfferTemplate,
   fillSubmissionTemplate,
-} from "../src/submission-templates.js";
+} from "../src/data/submission-templates.js";
 
 describe("fillOaTemplate", () => {
   it("fills in attempt number + accepted URLs as HTML", () => {

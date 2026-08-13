@@ -9,7 +9,7 @@
 // Before bundling, each content script carried its own copy of all of
 // this. keystroke-tracker.js, leetcode-tracker.js and leetcode-auth.js
 // had three near-identical encoders that were free to drift apart.
-import { firebaseConfig } from "../firebase-config.js";
+import { firebaseConfig } from "../platform/firebase-config.js";
 
 export const FIRESTORE_BASE =
   `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +

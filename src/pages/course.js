@@ -6,7 +6,7 @@
 // Reuses dashboard.css for styling. Interactive OA / performance-exam
 // cards only render for current/past weeks; future weeks show a
 // placeholder that hints at the coming assignments.
-import { fetchStudent } from "./firestore.js";
+import { fetchStudent } from "../platform/firestore.js";
 import {
   getAllScheduleCards,
   classifyWeek,
@@ -15,19 +15,19 @@ import {
   getOaRuntimeShape,
   getAssignments,
   getTopics,
-} from "./course-data.js";
+} from "../data/course-data.js";
 import {
   createThirdCardSection,
   getCachedProgress,
   refreshProgress,
-} from "./third-card.js";
+} from "../ui/third-card.js";
 import {
   getCachedAssignmentProgress,
   refreshAssignmentProgress,
   ASSIGNMENT_PROGRESS_CACHE_KEY,
-} from "./assignment-progress.js";
-import { getActive, OA_SESSION_KEY } from "./oa-session.js";
-import { renderExtraCreditSection } from "./extra-credit-view.js";
+} from "../data/assignment-progress.js";
+import { getActive, OA_SESSION_KEY } from "../data/oa-session.js";
+import { renderExtraCreditSection } from "../ui/extra-credit-view.js";
 
 // Module-scoped state — render() reads from these.
 let currentCards = [];

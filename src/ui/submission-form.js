@@ -25,10 +25,10 @@
 //   - On failure: shows an error banner in the modal, keeps it open so
 //     the student can retry.
 
-import { patchDoc } from "./firestore.js";
-import { fillSubmissionTemplate } from "./submission-templates.js";
-import { ASSIGNMENT_PROGRESS_CACHE_KEY } from "./assignment-progress.js";
-import { describeCanvasError, canvasErrorHint } from "./lib/canvas-error.js";
+import { patchDoc } from "../platform/firestore.js";
+import { fillSubmissionTemplate } from "../data/submission-templates.js";
+import { ASSIGNMENT_PROGRESS_CACHE_KEY } from "../data/assignment-progress.js";
+import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
 
 // ---- Field schemas per assignment ------------------------------------
 //

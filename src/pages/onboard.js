@@ -1,5 +1,5 @@
-import { fetchStudent, updateStudent } from "./firestore.js";
-import { signIn, VerifyStudentError } from "./auth.js";
+import { fetchStudent, updateStudent } from "../platform/firestore.js";
+import { signIn, VerifyStudentError } from "../platform/auth.js";
 
 // Three-step wizard:
 //   Step 0 — Welcome: what the extension does and what data it uses.

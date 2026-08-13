@@ -19,12 +19,9 @@ with a Test Student proxy, not as a genuinely enrolled student.
 
 ## READ THIS FIRST: there is now a build step
 
-`src/keystroke-tracker.js`, `src/keystroke-injector.js`,
-`src/leetcode-tracker.js`, `src/leetcode-auth.js` and
-`src/canvas-auth.js` are **generated files**. Editing them directly is
-wasted work — the next build overwrites it.
-
-The real source is `src/content/`, which imports from `src/lib/`.
+Everything in **`src/generated/`** is bundler output. Editing it is wasted
+work — the next build overwrites it. The real source is `src/content/`,
+which imports from `src/lib/`.
 
 ```
 npm run build         # src/content/ -> src/  (after every edit)
@@ -103,6 +100,25 @@ looks convincing and is wrong.
 - **GitHub Actions** runs `build:check` then the suite on push to main
   and on PRs.
 - **Branch protection is still off** — nothing gates a merge yet.
+
+### Layout
+
+```
+src/
+  manifest.json, *.html, *.css, course.json
+  pages/       one entry point per HTML page; nothing imports these
+  ui/          rendering shared between pages
+  data/        course + keystroke domain logic, mostly pure
+  platform/    Firebase, Chrome, network
+  lib/         small shared modules (also used by content scripts)
+  content/     content-script SOURCE
+  generated/   content-script BUILD OUTPUT — do not edit
+```
+
+`scripts/check-paths.js` resolves every manifest path, HTML `src`/`href`,
+relative import and `vi.mock()` specifier. Chrome fails a bad manifest
+path silently, so moving files without it is how you lose a content
+script without noticing.
 
 ### Key files added since Aug 5
 ```

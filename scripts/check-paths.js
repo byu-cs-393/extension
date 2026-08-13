@@ -94,15 +94,21 @@ function isExternal(path) {
   );
 }
 
-// ---- ES module imports --------------------------------------------------
+// ---- ES module + vi.mock specifiers ------------------------------------
 //
 // Tests catch broken imports in anything they import, but nothing imports
-// the page entry points (dashboard.js et al.) — those are only loaded by
-// a browser. Walking their relative imports covers that gap.
+// the page entry points (src/pages/*) — those are only loaded by a
+// browser. Test files are walked too, because a stale vi.mock() path
+// fails the whole suite rather than an assertion.
 
-for (const file of walkJs(SRC)) {
+for (const file of [...walkJs(SRC), ...walkJs(join(ROOT, "tests"))]) {
   const source = readFileSync(file, "utf8");
-  for (const match of source.matchAll(/(?:from|import)\s+["'](\.[^"']+)["']/g)) {
+  // `from "..."`, `import "..."`, and vi.mock("...") — the last one is a
+  // module path too, and a stale one takes out an entire test suite
+  // without failing a single assertion.
+  const specifiers = /(?:from|import)\s+["'](\.[^"']+)["']|vi\.mock\(\s*["'](\.[^"']+)["']/g;
+  for (const match of source.matchAll(specifiers)) {
+    match[1] = match[1] ?? match[2];
     const target = resolve(dirname(file), match[1]);
     if (!existsSync(target)) {
       problems.push(

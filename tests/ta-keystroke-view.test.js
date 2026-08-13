@@ -18,7 +18,7 @@ import {
   renderKeystrokeSection,
   fetchKeystrokeSessions,
   clearSessionCache,
-} from "../src/ta-keystroke-view.js";
+} from "../src/ui/ta-keystroke-view.js";
 
 const T0 = 1_756_900_000_000;
 

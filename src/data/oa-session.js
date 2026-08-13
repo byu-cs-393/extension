@@ -22,7 +22,7 @@
 // Pass/fail determination is intentionally NOT handled here — that's
 // Phase C (solve attribution). Phase B just tracks that an attempt
 // started and ended.
-import { patchDoc, fetchStudent, deleteDoc } from "./firestore.js";
+import { patchDoc, fetchStudent, deleteDoc } from "../platform/firestore.js";
 
 export const OA_SESSION_KEY = "activeOaSession";
 

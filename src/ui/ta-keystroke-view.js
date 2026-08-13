@@ -19,7 +19,7 @@
 // Everything a TA sees here is an observation with its counter-reading
 // attached. There is no score and no verdict; see the header comment in
 // keystroke-analysis.js for why.
-import { fetchCollection as firestoreFetchCollection } from "./firestore.js";
+import { fetchCollection as firestoreFetchCollection } from "../platform/firestore.js";
 import {
   canReplay,
   buildReplayTimeline,
@@ -27,7 +27,7 @@ import {
   textAtStep,
   stepIndexAtPlaybackMs,
   offsetMsAtStep,
-} from "./keystroke-replay.js";
+} from "../data/keystroke-replay.js";
 import {
   summarizeSession,
   suspicionSignals,
@@ -36,7 +36,7 @@ import {
   totalActiveMs,
   activeMsByProblem,
   formatDuration,
-} from "./keystroke-analysis.js";
+} from "../data/keystroke-analysis.js";
 
 // Summaries already computed this page-load, keyed by sessionId, so
 // re-expanding a row doesn't refetch its chunks.

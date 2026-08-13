@@ -7,20 +7,20 @@
 // MVP scope: signoff queue only. Struggling students and student
 // detail are placeholder tabs for now.
 
-import { getRole } from "./auth.js";
-import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
+import { getRole } from "../platform/auth.js";
+import { fetchCollection, fetchDoc, patchDoc } from "../platform/firestore.js";
 import {
   getAllScheduleCards,
   classifyWeek,
   solvedSlugsInWeek,
   flattenPlacementsToProblems,
-} from "./course-data.js";
-import { recordSignoffDecision } from "./assignment-progress.js";
+} from "../data/course-data.js";
+import { recordSignoffDecision } from "../data/assignment-progress.js";
 import {
   fetchKeystrokeSessions,
   renderKeystrokeSection,
   clearSessionCache,
-} from "./ta-keystroke-view.js";
+} from "../ui/ta-keystroke-view.js";
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 

@@ -26,7 +26,7 @@ import {
   slugToTitle,
   MAX_ACTIVE_GAP_MS,
   MIN_SAMPLES_FOR_CADENCE,
-} from "../src/keystroke-analysis.js";
+} from "../src/data/keystroke-analysis.js";
 
 const T0 = 1_756_900_000_000; // arbitrary fixed epoch, keeps tests deterministic
 

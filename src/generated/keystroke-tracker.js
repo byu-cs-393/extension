@@ -3,7 +3,7 @@
 // Edit the source there and run: npm run build
 
 (() => {
-  // src/firebase-config.js
+  // src/platform/firebase-config.js
   var firebaseConfig = {
     apiKey: "AIzaSyC2RxnVrQii0rT-Tm3JZmURmHzico-VqDg",
     authDomain: "cs393-496021.firebaseapp.com",
@@ -124,7 +124,7 @@
     };
   }
 
-  // src/keystroke-analysis.js
+  // src/data/keystroke-analysis.js
   var MAX_ACTIVE_GAP_MS = 12e4;
 
   // src/content/keystroke-tracker.js

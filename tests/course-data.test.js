@@ -18,7 +18,7 @@ import {
   studyProblemsForWeek,
   firstUnsolvedProblem,
   translateOaToRuntimeShape,
-} from "../src/course-data.js";
+} from "../src/data/course-data.js";
 
 describe("parseScheduleDates", () => {
   it("returns null for non-strings", () => {

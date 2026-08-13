@@ -29,7 +29,7 @@
 //       status: "completed",
 //       completedAt, whoWith?, selfRating?: 1|2|3 }
 
-import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
+import { fetchCollection, fetchDoc, patchDoc } from "../platform/firestore.js";
 
 export const ASSIGNMENT_PROGRESS_CACHE_KEY = "assignmentProgressBundle";
 

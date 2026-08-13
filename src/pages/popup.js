@@ -3,7 +3,7 @@ import {
   solvedSlugsInWeek,
   flattenPlacementsToProblems,
   firstUnsolvedProblem,
-} from "./course-data.js";
+} from "../data/course-data.js";
 
 // Both panels + the sync pill and footer — the popup toggles between
 // the pre-onboarding welcome and the normal current-week view based on

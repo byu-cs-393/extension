@@ -7,7 +7,10 @@
     "default_popup": "popup.html",
     "default_title": "CS 393 Buddy"
   },
-  "permissions": ["storage", "alarms"],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
   "host_permissions": [
     "https://firestore.googleapis.com/*",
     "https://leetcode.com/*",
@@ -17,35 +20,55 @@
     "https://cs393-496021.web.app/*"
   ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "platform/background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/*"],
-      "js": ["leetcode-auth.js"],
+      "matches": [
+        "https://leetcode.com/*"
+      ],
+      "js": [
+        "generated/leetcode-auth.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://leetcode.com/problems/*"],
-      "js": ["leetcode-tracker.js"],
+      "matches": [
+        "https://leetcode.com/problems/*"
+      ],
+      "js": [
+        "generated/leetcode-tracker.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://leetcode.com/problems/*"],
-      "js": ["keystroke-tracker.js"],
+      "matches": [
+        "https://leetcode.com/problems/*"
+      ],
+      "js": [
+        "generated/keystroke-tracker.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://byu.instructure.com/*"],
-      "js": ["canvas-auth.js"],
+      "matches": [
+        "https://byu.instructure.com/*"
+      ],
+      "js": [
+        "generated/canvas-auth.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["keystroke-injector.js"],
-      "matches": ["https://leetcode.com/*"]
+      "resources": [
+        "generated/keystroke-injector.js"
+      ],
+      "matches": [
+        "https://leetcode.com/*"
+      ]
     }
   ]
 }

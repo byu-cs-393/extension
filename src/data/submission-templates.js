@@ -37,7 +37,7 @@ function escapeAttr(str) {
 // ---- Shared building blocks -------------------------------------------
 
 // Emit "<p><strong>Label:</strong> value</p>". Value gets HTML-escaped.
-import { studyPointsBreakdown } from "./lib/study-points.js";
+import { studyPointsBreakdown } from "../lib/study-points.js";
 function pLabelValue(label, value) {
   return `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value ?? "")}</p>`;
 }

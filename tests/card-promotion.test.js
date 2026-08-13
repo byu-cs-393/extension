@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { getCardsForWeek, getAssignmentById } from "../src/course-data.js";
+import { getCardsForWeek, getAssignmentById } from "../src/data/course-data.js";
 
 beforeAll(() => {
   const course = JSON.parse(

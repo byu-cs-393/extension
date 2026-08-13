@@ -1,6 +1,6 @@
-import { fetchStudent, fetchCollection } from "./firestore.js";
-import { getRole } from "./auth.js";
-import { trackedActiveMsInWindow } from "./keystroke-analysis.js";
+import { fetchStudent, fetchCollection } from "../platform/firestore.js";
+import { getRole } from "../platform/auth.js";
+import { trackedActiveMsInWindow } from "../data/keystroke-analysis.js";
 import {
   getVisibleWeeks,
   getCardsForWeek,
@@ -11,18 +11,18 @@ import {
   getTopics,
   studyProblemsForWeek,
   studyAssignmentIdForWeek,
-} from "./course-data.js";
+} from "../data/course-data.js";
 import {
   createThirdCardSection,
   getCachedProgress,
   refreshProgress,
   appendCanvasSubmitAffordance,
-} from "./third-card.js";
+} from "../ui/third-card.js";
 import {
   getCachedAssignmentProgress,
   refreshAssignmentProgress,
   ASSIGNMENT_PROGRESS_CACHE_KEY,
-} from "./assignment-progress.js";
+} from "../data/assignment-progress.js";
 import {
   getActive,
   getRemainingMs,
@@ -31,7 +31,7 @@ import {
   solvedInWindow,
   attemptPassed,
   OA_SESSION_KEY,
-} from "./oa-session.js";
+} from "../data/oa-session.js";
 
 // Module-scoped state — render() reads from these. Two paths update
 // them: chrome.storage.onChanged (live), or the bootstrap (initial).

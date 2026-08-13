@@ -32,7 +32,7 @@
 //
 //   When no progress doc exists, the card renders in its default
 //   "unattempted" state for that type.
-import { fetchCollection, patchDoc } from "./firestore.js";
+import { fetchCollection, patchDoc } from "../platform/firestore.js";
 import {
   startAttempt,
   endActiveAttempt,
@@ -40,11 +40,11 @@ import {
   formatRemaining,
   solvedInWindow,
   resetOa,
-} from "./oa-session.js";
-import { requestSignoff, submitSelfRating } from "./assignment-progress.js";
-import { fillOaTemplate } from "./submission-templates.js";
+} from "../data/oa-session.js";
+import { requestSignoff, submitSelfRating } from "../data/assignment-progress.js";
+import { fillOaTemplate } from "../data/submission-templates.js";
 import { openSubmissionForm } from "./submission-form.js";
-import { describeCanvasError, canvasErrorHint } from "./lib/canvas-error.js";
+import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
 

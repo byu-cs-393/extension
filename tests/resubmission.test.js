@@ -8,20 +8,20 @@
 // it will do.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-vi.mock("../src/firestore.js", () => ({ fetchCollection: vi.fn(), patchDoc: vi.fn() }));
-vi.mock("../src/oa-session.js", () => ({
+vi.mock("../src/platform/firestore.js", () => ({ fetchCollection: vi.fn(), patchDoc: vi.fn() }));
+vi.mock("../src/data/oa-session.js", () => ({
   startAttempt: vi.fn(), endActiveAttempt: vi.fn(), getRemainingMs: vi.fn(),
   formatRemaining: vi.fn(), solvedInWindow: vi.fn(() => new Set()), resetOa: vi.fn(),
 }));
-vi.mock("../src/assignment-progress.js", () => ({
+vi.mock("../src/data/assignment-progress.js", () => ({
   requestSignoff: vi.fn(), submitSelfRating: vi.fn(),
 }));
-vi.mock("../src/submission-templates.js", () => ({ fillOaTemplate: vi.fn(() => "") }));
+vi.mock("../src/data/submission-templates.js", () => ({ fillOaTemplate: vi.fn(() => "") }));
 
 const openSubmissionForm = vi.fn();
-vi.mock("../src/submission-form.js", () => ({ openSubmissionForm }));
+vi.mock("../src/ui/submission-form.js", () => ({ openSubmissionForm }));
 
-const { appendCanvasSubmitAffordance } = await import("../src/third-card.js");
+const { appendCanvasSubmitAffordance } = await import("../src/ui/third-card.js");
 
 const ctx = { netID: "jack684", weekNum: 3 };
 const item = { type: "study", assignmentId: "study-w3" };

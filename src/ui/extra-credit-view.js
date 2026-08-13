@@ -13,7 +13,7 @@ import {
   extraCreditCards,
   cardState,
   extraCreditTotals,
-} from "./lib/extra-credit-catalog.js";
+} from "../lib/extra-credit-catalog.js";
 
 export function renderExtraCreditSection(container, {
   assignments,
