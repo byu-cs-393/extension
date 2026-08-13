@@ -11,7 +11,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "ci": "npm run build:check && npm run test:run",
-    "check:paths": "node scripts/check-paths.js"
+    "check:paths": "node scripts/check-paths.js",
+    "check:course": "node scripts/check-vendored-course.js"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

@@ -54,5 +54,13 @@ jobs:
         # Chrome just never loads that content script.
         run: npm run build:check
 
+      - name: Check the vendored schedule wasn't shifted for testing
+        # scripts/shift-schedule-for-testing.js rewrites every date so a
+        # week contains today. It's meant to stay uncommitted, and has been
+        # committed by accident three times. On main it means students see
+        # a semester that's already half over. Not in build:check, because
+        # locally the shift is applied on purpose.
+        run: npm run check:course
+
       - name: Run tests
         run: npm run test:run
