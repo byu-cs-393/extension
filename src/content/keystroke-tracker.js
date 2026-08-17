@@ -264,6 +264,44 @@ const LOCATION_POLL_MS = 1000;
 
 // ---- Injector bridge ---------------------------------------------------
 
+// The injector runs in the page world and is the ONLY source of `delta`
+// and `snapshot` events. Paste, copy and visibility are captured here in
+// the content script, so if the injector fails to load, recording looks
+// alive — the badge stays red, sessions keep appearing, clipboard events
+// keep arriving — while every keystroke is silently lost.
+//
+// That happened for real: a file move left the injector's URL pointing
+// at nothing, and it went unnoticed until someone tried to replay a
+// session and found it empty. So the handshake is now checked.
+let injectorReady = false;
+let injectorWatchdog = null;
+
+const INJECTOR_HANDSHAKE_TIMEOUT_MS = 15_000;
+
+function noteInjectorReady() {
+  injectorReady = true;
+  if (injectorWatchdog !== null) {
+    clearTimeout(injectorWatchdog);
+    injectorWatchdog = null;
+  }
+}
+
+function watchForInjector() {
+  if (injectorReady || injectorWatchdog !== null) return;
+  injectorWatchdog = setTimeout(() => {
+    injectorWatchdog = null;
+    if (injectorReady) return;
+    console.error(
+      "[CS 393 Buddy] the editor hook never loaded — keystrokes are NOT " +
+        "being recorded for this page. Clipboard and tab events still are, " +
+        "which is why this is easy to miss. Check that " +
+        "generated/keystroke-injector.js exists and is listed in " +
+        "manifest.web_accessible_resources.",
+    );
+    markBadgeDegraded();
+  }, INJECTOR_HANDSHAKE_TIMEOUT_MS);
+}
+
 function injectPageScript() {
   const scriptEl = document.createElement("script");
   scriptEl.src = chrome.runtime.getURL("generated/keystroke-injector.js");
@@ -316,6 +354,7 @@ window.addEventListener("message", (event) => {
     data.type === "injector-loaded" ||
     data.type === "injector-already-loaded"
   ) {
+    noteInjectorReady();
     console.log(`[CS 393 Buddy] injector: ${data.type}`);
   }
 });
@@ -462,6 +501,20 @@ function mountBadge() {
   document.body.appendChild(badge);
 }
 
+// Recording, but without the editor hook — clipboard and tab events only.
+// Distinct from the stopped state: something IS still being written, just
+// not the part anyone cares about.
+function markBadgeDegraded() {
+  const badge = document.getElementById("cs393-recording-badge");
+  if (!badge) return;
+  badge.setAttribute(
+    "aria-label",
+    "CS 393 Buddy: editor not hooked, keystrokes are not being recorded",
+  );
+  badge.style.background = "rgba(217, 119, 6, 0.95)";
+  badge.textContent = "⚠ CS 393 — keystrokes not recording";
+}
+
 // Turns the badge into a visible, honest "not recording any more" state.
 // The whole point of the badge is that a student can trust it, which
 // means it has to stop claiming to record the moment it can't.
@@ -491,6 +544,7 @@ function markBadgeStopped() {
   console.log("[CS 393 Buddy] keystroke tracker active");
 
   injectPageScript();
+  watchForInjector();
   mountBadge();
   // Kick off the first session if we're already on a problem page.
   const slug = parseProblemSlug(location.href);

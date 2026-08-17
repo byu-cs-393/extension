@@ -277,6 +277,27 @@
   }
   var lastSeenHref = location.href;
   var LOCATION_POLL_MS = 1e3;
+  var injectorReady = false;
+  var injectorWatchdog = null;
+  var INJECTOR_HANDSHAKE_TIMEOUT_MS = 15e3;
+  function noteInjectorReady() {
+    injectorReady = true;
+    if (injectorWatchdog !== null) {
+      clearTimeout(injectorWatchdog);
+      injectorWatchdog = null;
+    }
+  }
+  function watchForInjector() {
+    if (injectorReady || injectorWatchdog !== null) return;
+    injectorWatchdog = setTimeout(() => {
+      injectorWatchdog = null;
+      if (injectorReady) return;
+      console.error(
+        "[CS 393 Buddy] the editor hook never loaded \u2014 keystrokes are NOT being recorded for this page. Clipboard and tab events still are, which is why this is easy to miss. Check that generated/keystroke-injector.js exists and is listed in manifest.web_accessible_resources."
+      );
+      markBadgeDegraded();
+    }, INJECTOR_HANDSHAKE_TIMEOUT_MS);
+  }
   function injectPageScript() {
     const scriptEl = document.createElement("script");
     scriptEl.src = chrome.runtime.getURL("generated/keystroke-injector.js");
@@ -320,6 +341,7 @@
         onLocationChange();
       }
     } else if (data.type === "editor-hooked" || data.type === "injector-loaded" || data.type === "injector-already-loaded") {
+      noteInjectorReady();
       console.log(`[CS 393 Buddy] injector: ${data.type}`);
     }
   });
@@ -416,6 +438,16 @@
     badge.textContent = "\u25CF CS 393 recording";
     document.body.appendChild(badge);
   }
+  function markBadgeDegraded() {
+    const badge = document.getElementById("cs393-recording-badge");
+    if (!badge) return;
+    badge.setAttribute(
+      "aria-label",
+      "CS 393 Buddy: editor not hooked, keystrokes are not being recorded"
+    );
+    badge.style.background = "rgba(217, 119, 6, 0.95)";
+    badge.textContent = "\u26A0 CS 393 \u2014 keystrokes not recording";
+  }
   function markBadgeStopped() {
     const badge = document.getElementById("cs393-recording-badge");
     if (!badge) return;
@@ -437,6 +469,7 @@
     netID = stored;
     console.log("[CS 393 Buddy] keystroke tracker active");
     injectPageScript();
+    watchForInjector();
     mountBadge();
     const slug = parseProblemSlug(location.href);
     if (slug) newSession(slug);
