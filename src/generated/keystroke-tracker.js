@@ -279,7 +279,7 @@
   var LOCATION_POLL_MS = 1e3;
   function injectPageScript() {
     const scriptEl = document.createElement("script");
-    scriptEl.src = chrome.runtime.getURL("keystroke-injector.js");
+    scriptEl.src = chrome.runtime.getURL("generated/keystroke-injector.js");
     scriptEl.onload = () => scriptEl.remove();
     (document.head || document.documentElement).appendChild(scriptEl);
   }

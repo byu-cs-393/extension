@@ -218,8 +218,8 @@ async function fetchSignoffQueueWithNames() {
 // We re-implement lightweight parsing here to preserve doc IDs (netIDs)
 // which our generic fetchCollection strips.
 async function fetchStudentsWithIds() {
-  const { firebaseConfig } = await import(chrome.runtime.getURL("firebase-config.js"));
-  const { getIdToken } = await import(chrome.runtime.getURL("auth.js"));
+  const { firebaseConfig } = await import(chrome.runtime.getURL("platform/firebase-config.js"));
+  const { getIdToken } = await import(chrome.runtime.getURL("platform/auth.js"));
   const url =
     `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}` +
     `/databases/(default)/documents/students?key=${firebaseConfig.apiKey}`;

@@ -118,6 +118,28 @@ for (const file of [...walkJs(SRC), ...walkJs(join(ROOT, "tests"))]) {
   }
 }
 
+// ---- chrome.runtime.getURL() -------------------------------------------
+//
+// These take a path relative to the EXTENSION ROOT (src/), not to the
+// calling file — so they look nothing like an import and survive any
+// amount of moving files around without complaint. Chrome resolves a
+// wrong one to a 404 at runtime: a dynamic import rejects, a <script src>
+// silently never loads.
+//
+// Reorganising src/ broke three of these and the import checks caught
+// none of them, because none of them are imports.
+
+for (const file of walkJs(SRC)) {
+  const source = readFileSync(file, "utf8");
+  for (const match of source.matchAll(
+    /chrome\.runtime\.getURL\(\s*["']([^"']+)["']\s*\)/g,
+  )) {
+    const target = match[1];
+    if (target.includes("${")) continue; // built at runtime, can't check
+    check(target, `${relative(ROOT, file)} chrome.runtime.getURL()`);
+  }
+}
+
 function walkJs(dir) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
