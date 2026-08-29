@@ -18,7 +18,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, relative } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = join(ROOT, "src");
+// Normally src/, but the packaging script points this at the staged copy
+// so the zip is verified as it will actually be installed — src/ having
+// every file proves nothing about what got copied.
+const SRC = process.env.CS393_SRC_OVERRIDE ?? join(ROOT, "src");
 
 const problems = [];
 const checked = [];
@@ -101,7 +104,11 @@ function isExternal(path) {
 // browser. Test files are walked too, because a stale vi.mock() path
 // fails the whole suite rather than an assertion.
 
-for (const file of [...walkJs(SRC), ...walkJs(join(ROOT, "tests"))]) {
+const testsDir = join(ROOT, "tests");
+const jsRoots = process.env.CS393_SRC_OVERRIDE
+  ? [SRC]                       // staged copy has no tests/
+  : [SRC, testsDir];
+for (const file of jsRoots.flatMap((dir) => walkJs(dir))) {
   const source = readFileSync(file, "utf8");
   // `from "..."`, `import "..."`, and vi.mock("...") — the last one is a
   // module path too, and a stale one takes out an entire test suite

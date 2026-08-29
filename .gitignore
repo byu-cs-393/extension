@@ -6,3 +6,5 @@ transcript-raw.txt
 # Node dependencies + Vitest artifacts
 node_modules/
 coverage/
+release/*.zip
+release/cs393-buddy-*/

@@ -203,6 +203,28 @@ scripts/shift-schedule-for-testing.js
 3. **Calibrate the thresholds** against honest sessions.
 4. **Revert the schedule shift before Sep 3** (`node scripts/vendor-course.js`).
 
+## Shipping to students
+
+Sideloaded, not the Chrome Web Store — review takes days to weeks, and a
+keystroke recorder asking for broad host permissions on two domains won't
+get the fast path.
+
+```
+npm run package     # -> release/cs393-buddy-<version>.zip
+```
+
+Refuses to build unless the schedule matches the professor's copy, the
+bundles are current, every runtime path resolves, and the tests pass.
+That first guard is the one that matters: the extension loads unpacked
+from src/, so whatever is in that folder is what students get. Zip a
+testing-shifted course.json and every student opens to a semester that
+started in July. The pre-commit hook and CI guard the git path; neither
+knows about "zipped the working tree".
+
+Send the zip AND `release/INSTALL.md`. No auto-updates — a fix means a
+new zip, and students must reload the extension AND any open LeetCode
+tabs.
+
 ## Commands
 
 ```
@@ -211,6 +233,7 @@ npm run build         # after editing src/content/ or src/lib/
 npm run test          # watch mode
 node scripts/shift-schedule-for-testing.js --week 3   # testing only
 node scripts/vendor-course.js                          # revert / re-vendor
+npm run package       # build the student zip (verifies first)
 firebase deploy --only firestore:rules
 firebase deploy --only functions
 ```
