@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CS 393 Buddy — Privacy Policy</title>
+    <style>
+      :root {
+        --text: #1f2937;
+        --muted: #6b7280;
+        --rule: #e5e7eb;
+        --accent: #2563eb;
+      }
+      body {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 48px 24px 96px;
+        font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--text);
+      }
+      h1 { font-size: 28px; margin-bottom: 4px; }
+      h2 { font-size: 19px; margin-top: 40px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+      .updated { color: var(--muted); font-size: 14px; margin-top: 0; }
+      table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+      th { font-weight: 600; }
+      code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+      .callout {
+        background: #eff6ff;
+        border-left: 3px solid var(--accent);
+        padding: 12px 16px;
+        border-radius: 0 6px 6px 0;
+        margin: 20px 0;
+      }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <h1>CS 393 Buddy — Privacy Policy</h1>
+    <p class="updated">Last updated 31 August 2026</p>
+
+    <p>
+      CS 393 Buddy is a Chrome extension built for one course: BYU CS 393,
+      Advanced Algorithms and Problem Solving. It is used only by students
+      enrolled in that course, and it exists to track coursework and submit it
+      to Canvas on the student's behalf.
+    </p>
+
+    <div class="callout">
+      <strong>The short version.</strong> On LeetCode problem pages, the
+      extension records what you type in the code editor, what you paste and
+      copy, and when the tab is in the foreground. Your instructor and TAs can
+      see it. It records nothing on any other website.
+    </div>
+
+    <h2>What is collected</h2>
+
+    <table>
+      <tr><th>Data</th><th>When</th><th>Why</th></tr>
+      <tr>
+        <td>Your BYU netID and name</td>
+        <td>During onboarding, read from your signed-in Canvas session</td>
+        <td>To identify you to the course and to submit work as you</td>
+      </tr>
+      <tr>
+        <td>Your LeetCode username and solved problems</td>
+        <td>While signed in to LeetCode</td>
+        <td>To show weekly progress and fill in assignment submissions</td>
+      </tr>
+      <tr>
+        <td><strong>Editor keystrokes</strong> — every insertion and deletion
+        in the LeetCode code editor, with timestamps</td>
+        <td>Only on <code>leetcode.com/problems/…</code> pages</td>
+        <td>So a TA can replay how a solution came together, and to measure
+        time actually spent working</td>
+      </tr>
+      <tr>
+        <td><strong>Clipboard contents</strong> — text you paste or copy on
+        those pages, including the text itself</td>
+        <td>Only on <code>leetcode.com/problems/…</code> pages</td>
+        <td>Academic-integrity review by course staff</td>
+      </tr>
+      <tr>
+        <td>Tab focus changes</td>
+        <td>Only on <code>leetcode.com/problems/…</code> pages</td>
+        <td>So time with the tab in the background isn't counted as study time</td>
+      </tr>
+      <tr>
+        <td>Assignment progress and Canvas submissions</td>
+        <td>When you request a signoff or submit</td>
+        <td>To record coursework and avoid duplicate submissions</td>
+      </tr>
+    </table>
+
+    <h2>What is not collected</h2>
+    <ul>
+      <li>
+        Anything on websites other than LeetCode problem pages and BYU Canvas.
+        The extension has no access to your other tabs, browsing history, or
+        clipboard elsewhere.
+      </li>
+      <li>Your Canvas or LeetCode password. The extension never sees either.</li>
+      <li>Anything while the extension is removed or disabled.</li>
+    </ul>
+
+    <h2>Who can see it</h2>
+    <p>
+      The course instructor and teaching assistants for CS 393. Nobody else.
+      Data is not sold, shared with third parties, used for advertising, or
+      used to train anything.
+    </p>
+    <p>
+      Recorded sessions are visible to course staff in a TA dashboard, which
+      shows time spent, typing patterns, and a replay of the editor. Where the
+      extension highlights something for review, it presents it as an
+      observation with its most likely innocent explanation attached — it does
+      not accuse anyone of anything, and a human always decides what a session
+      means.
+    </p>
+
+    <h2>Where it is stored</h2>
+    <p>
+      In Google Cloud Firestore, in the project <code>cs393-496021</code>,
+      controlled by the course instructor. Access is enforced by security
+      rules: a student can read and write only their own records; course staff
+      can read all of them. Submitted coursework is also stored in BYU Canvas,
+      under the same policies as any other assignment you submit.
+    </p>
+    <p>
+      A small amount of data is cached locally in your browser
+      (<code>chrome.storage</code>) so pages load quickly. Removing the
+      extension clears it.
+    </p>
+
+    <h2>How long it is kept</h2>
+    <p>
+      For the duration of the course and while grades may be appealed. Course
+      records may be retained afterwards under BYU's academic record policies.
+      You can ask the instructor to delete your recorded sessions at any time;
+      that request will be honoured unless the data is part of an open academic
+      integrity matter.
+    </p>
+
+    <h2>Your choices</h2>
+    <p>
+      Using the extension is a course requirement, but it is entirely within
+      your control while installed:
+    </p>
+    <ul>
+      <li>
+        A badge appears on every LeetCode problem page showing whether
+        recording is active. It is always visible while recording.
+      </li>
+      <li>
+        Removing the extension at <code>chrome://extensions</code> stops all
+        collection immediately.
+      </li>
+      <li>
+        Recording only happens on LeetCode problem pages. Closing that tab
+        ends it.
+      </li>
+    </ul>
+
+    <h2>Changes</h2>
+    <p>
+      If what the extension collects changes, this page is updated and students
+      are told through the course. The date at the top always reflects the
+      current version.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Jack Leonard —
+      <a href="mailto:jack684@byu.edu">jack684@byu.edu</a><br />
+      Course instructor: Michael Reynolds —
+      <a href="mailto:mtr26@byu.edu">mtr26@byu.edu</a>
+    </p>
+  </body>
+</html>

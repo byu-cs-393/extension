@@ -3,9 +3,25 @@
   "name": "CS 393 Buddy",
   "version": "0.0.1",
   "description": "Track your CS 393 weekly LeetCode work, pass off topic exams with a TA, and stay synced with Canvas.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "CS 393 Buddy"
+    "default_title": "CS 393 Buddy",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "platform/background.js",
+    "type": "module"
   },
   "permissions": [
     "storage",
@@ -19,10 +35,6 @@
     "https://securetoken.googleapis.com/*",
     "https://cs393-496021.web.app/*"
   ],
-  "background": {
-    "service_worker": "platform/background.js",
-    "type": "module"
-  },
   "content_scripts": [
     {
       "matches": [

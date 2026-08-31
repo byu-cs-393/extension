@@ -57,6 +57,9 @@ sites, not other tabs, not your clipboard when you're elsewhere.
 Your instructor and TAs can see this. It's how weekly study time gets
 verified and how a TA can look at your work with you.
 
+Full detail, including how long it's kept and how to have it deleted:
+https://cs393-496021.web.app/privacy.html
+
 The badge tells you the current state:
 
 | Badge | Meaning |

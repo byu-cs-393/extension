@@ -225,6 +225,30 @@ Send the zip AND `release/INSTALL.md`. No auto-updates — a fix means a
 new zip, and students must reload the extension AND any open LeetCode
 tabs.
 
+## Chrome Web Store (not done)
+
+Sideloading is the launch plan; the store is the fix for updates, since
+Chrome auto-updates within hours and students do nothing. It could not be
+ready for Sep 3 — review for a new extension takes days at minimum, and a
+keystroke recorder with broad host permissions draws manual review.
+Submit in parallel and migrate once approved.
+
+Ready:
+  - icons (`node scripts/generate-icons.js`, drawn in code, no artboard
+    to lose)
+  - privacy policy at public/privacy.html ->
+    https://cs393-496021.web.app/privacy.html
+
+Still needed: $5 developer account (the architecture notes assume the
+instructor's licence — confirm he has one), a 1280x800 screenshot, written
+justification for each host permission, and the data-use disclosure form.
+Publish **Unlisted** — reviewed, but link-only rather than searchable.
+
+Migration gotcha: a store install has a DIFFERENT extension id, so
+chrome.storage starts empty and students re-onboard (Firestore data
+survives, it's keyed by netID). More importantly, both copies installed at
+once would double-record — tell students to REMOVE the unpacked one first.
+
 ## Commands
 
 ```
