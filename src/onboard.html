@@ -113,7 +113,7 @@
           </p>
         </div>
 
-        <!-- Canvas signed in: show identity card + form for display name / note. -->
+        <!-- Canvas signed in: show identity card + display-name form. -->
         <div id="canvas-signed-in" class="canvas-state" hidden>
           <div class="canvas-card">
             <div class="canvas-card-label">Signed in to Canvas as</div>
@@ -128,19 +128,6 @@
                 <span class="hint">how the dashboard greets you</span>
               </label>
               <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
-            </div>
-
-            <div class="field">
-              <label for="input-note">
-                Status note
-                <span class="hint">optional</span>
-              </label>
-              <input
-                type="text"
-                id="input-note"
-                autocomplete="off"
-                placeholder="e.g. focused on hash maps this week"
-              />
             </div>
 
             <button type="submit" class="btn-primary" id="step1-submit-btn">Continue →</button>

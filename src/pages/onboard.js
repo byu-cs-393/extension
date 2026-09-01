@@ -7,7 +7,7 @@ import { signIn, VerifyStudentError } from "../platform/auth.js";
 //            on file. A "Get started" click advances to Step 1.
 //   Step 1 — Canvas identity: requires an active BYU Canvas session.
 //            netID + lti_user_id come from Canvas; the student fills in
-//            display name + optional status note. verifyStudent
+//            display name. verifyStudent
 //            server-side re-verifies the (netID, lti_user_id) pair
 //            against Canvas using the instructor's Canvas API token.
 //   Step 2 — LeetCode link: detect via leetcode-auth content script,
@@ -29,7 +29,6 @@ const canvasCardName = document.getElementById("canvas-card-name");
 const step1Form = document.getElementById("step1-form");
 const step1SubmitBtn = document.getElementById("step1-submit-btn");
 const nameInput = document.getElementById("input-name");
-const noteInput = document.getElementById("input-note");
 const step1Status = document.getElementById("step1-status");
 
 const step2Panel = document.querySelector('.step-panel[data-step="2"]');
@@ -90,7 +89,7 @@ function renderCanvasState(auth) {
   }
 }
 
-// Pre-fill display name + status note from any existing student doc, but
+// Pre-fill display name from any existing student doc, but
 // only when we know the netID (i.e., once Canvas detection has landed).
 let lastPrefilledForNetID = null;
 async function maybePrefillProfile(netID) {
@@ -103,9 +102,6 @@ async function maybePrefillProfile(netID) {
         nameInput.value = student.name;
       } else if (!nameInput.value.trim() && currentCanvasAuth?.name) {
         nameInput.value = currentCanvasAuth.name;
-      }
-      if (!noteInput.value.trim() && typeof student.note === "string") {
-        noteInput.value = student.note;
       }
     } else if (currentCanvasAuth?.name && !nameInput.value.trim()) {
       nameInput.value = currentCanvasAuth.name;
@@ -310,7 +306,6 @@ step1Form.addEventListener("submit", async (event) => {
   const ltiUserId = currentCanvasAuth.ltiUserId;
   const canvasUserId = currentCanvasAuth.canvasUserId ?? null;
   const name = nameInput.value.trim();
-  const note = noteInput.value.trim();
 
   step1SubmitBtn.disabled = true;
   setStatusWorking(step1Status, "Verifying with BYU…");
@@ -325,10 +320,9 @@ step1Form.addEventListener("submit", async (event) => {
 
     const fields = {};
     if (name) fields.name = name;
-    if (note) fields.note = note;
     // canvasUserId is REQUIRED for auto-submit to masquerade as this
-    // student. Persist it on the Firestore doc even when name/note are
-    // empty so Cloud Functions can look it up later.
+    // student. Persist it on the Firestore doc even when the display name
+    // is empty so Cloud Functions can look it up later.
     if (canvasUserId != null) fields.canvasUserId = canvasUserId;
     if (Object.keys(fields).length > 0) {
       await updateStudent(netID, fields);
