@@ -354,6 +354,90 @@ function buildFieldRow(field, prefillValue) {
   return row;
 }
 
+// Sends one submission to Canvas and records it on assignmentProgress.
+//
+// Shared by the modal and by the automatic submissions the dashboard
+// makes for TA-approved exams, so both take exactly the same path — the
+// idempotency marker, the submit count and the stored field values all
+// behave identically however the submission was triggered.
+//
+// Returns { ok, result }. Never throws for a Canvas-side failure; the
+// caller decides how to surface it.
+export async function sendCanvasSubmission({
+  type,
+  assignmentId,
+  weekNum,
+  netID,
+  data,
+  fieldValues = data,
+  submissionType = "online_text_entry",
+}) {
+  let payload;
+  if (submissionType === "online_url") {
+    payload = { assignmentId, submissionType, url: data.url };
+  } else {
+    payload = {
+      assignmentId,
+      submissionType,
+      body: fillSubmissionTemplate({ type, assignmentId, data }),
+    };
+  }
+
+  const result = await new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "submitCanvasAssignment", payload },
+      (r) => resolve(r),
+    );
+  });
+
+  if (result?.outcome !== "submitted") {
+    console.error("[CS 393 Buddy] Canvas submit failed:", result);
+    return { ok: false, result };
+  }
+
+  const submittedAt = Date.now();
+  const progressType = progressTypeFor({ type, assignmentId });
+  try {
+    // Read the cached doc BEFORE writing, both to carry forward fields
+    // this caller doesn't own (signoff status) and to know how many times
+    // this has been submitted already.
+    const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
+    const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
+    const existing = bundle.progress?.[assignmentId] ?? {};
+    const priorCount = Number.isFinite(existing.canvasSubmitCount)
+      ? existing.canvasSubmitCount
+      : existing.canvasSubmittedAt
+        ? 1
+        : 0;
+
+    const newProgress = {
+      assignmentId,
+      type: progressType,
+      canvasSubmittedAt: submittedAt,
+      canvasSubmissionId: result.canvasSubmissionId ?? null,
+      canvasSubmitCount: priorCount + 1,
+      // What was entered, so a resubmission can prefill from it. Not the
+      // rendered body — that's Canvas's copy, and storing HTML here would
+      // only go stale against the template.
+      canvasSubmissionData: fieldValues,
+      ...(Number.isFinite(weekNum) ? { weekNum } : {}),
+    };
+
+    await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newProgress);
+    bundle.progress = {
+      ...(bundle.progress ?? {}),
+      [assignmentId]: { ...existing, ...newProgress },
+    };
+    bundle.syncedAt = Date.now();
+    await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
+  } catch (patchErr) {
+    // Non-fatal — Canvas has the submission. Log for visibility.
+    console.error("[CS 393 Buddy] canvasSubmittedAt patch failed:", patchErr);
+  }
+
+  return { ok: true, result };
+}
+
 async function handleSubmit(opts, form, errorBanner, submitBtn) {
   const { type, assignmentId, weekNum, netID, extraSubmitData, onSubmitted } = opts;
   const schema = resolveSchema({ type, assignmentId });
@@ -380,84 +464,28 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
     }
     const data = { ...extraSubmitData, ...fieldValues };
 
-    const submissionType = schema.submissionType ?? "online_text_entry";
-    let payload;
-    if (submissionType === "online_url") {
-      payload = {
-        assignmentId,
-        submissionType,
-        url: data.url,
-      };
-    } else {
-      const body = fillSubmissionTemplate({ type, assignmentId, data });
-      payload = {
-        assignmentId,
-        submissionType,
-        body,
-      };
-    }
-
-    const result = await new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: "submitCanvasAssignment", payload },
-        (r) => resolve(r),
-      );
+    const outcome = await sendCanvasSubmission({
+      type,
+      assignmentId,
+      weekNum,
+      netID,
+      data,
+      fieldValues,
+      submissionType: schema.submissionType ?? "online_text_entry",
     });
-    if (result?.outcome !== "submitted") {
-      console.error("[CS 393 Buddy] Canvas submit failed:", result);
-      const hint = canvasErrorHint(result);
+
+    if (!outcome.ok) {
+      const hint = canvasErrorHint(outcome.result);
       showError(
         errorBanner,
-        `Couldn't submit to Canvas: ${describeCanvasError(result)}` +
+        `Couldn't submit to Canvas: ${describeCanvasError(outcome.result)}` +
           (hint ? `\n\n${hint}` : ""),
       );
       submitBtn.disabled = false;
       submitBtn.textContent = originalLabel;
       return;
     }
-
-    // Record the successful submission on assignmentProgress so the
-    // dashboard's card can display "✓ Submitted" and idempotency-guard
-    // future clicks.
-    const submittedAt = Date.now();
-    const progressType = progressTypeFor({ type, assignmentId });
-    try {
-      // Read the cached doc BEFORE writing, both to carry forward fields
-      // this form doesn't own (signoff status) and to know how many times
-      // this has been submitted already.
-      const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
-      const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
-      const existing = bundle.progress?.[assignmentId] ?? {};
-      const priorCount = Number.isFinite(existing.canvasSubmitCount)
-        ? existing.canvasSubmitCount
-        : existing.canvasSubmittedAt
-          ? 1
-          : 0;
-
-      const newProgress = {
-        assignmentId,
-        type: progressType,
-        canvasSubmittedAt: submittedAt,
-        canvasSubmissionId: result.canvasSubmissionId ?? null,
-        canvasSubmitCount: priorCount + 1,
-        // What the student typed, so a resubmission can prefill from it.
-        // Not the rendered body — that's Canvas's copy, and storing HTML
-        // here would only go stale against the template.
-        canvasSubmissionData: fieldValues,
-        ...(Number.isFinite(weekNum) ? { weekNum } : {}),
-      };
-
-      await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newProgress);
-      bundle.progress = {
-        ...(bundle.progress ?? {}),
-        [assignmentId]: { ...existing, ...newProgress },
-      };
-      bundle.syncedAt = Date.now();
-      await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
-    } catch (patchErr) {
-      // Non-fatal — Canvas has the submission. Log for visibility.
-      console.error("[CS 393 Buddy] canvasSubmittedAt patch failed:", patchErr);
-    }
+    const result = outcome.result;
 
     onSubmitted?.(result);
     closeModal();

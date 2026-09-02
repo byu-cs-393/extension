@@ -123,6 +123,13 @@ export async function recordSignoffDecision({
   outcome, // "passed" | "failed"
   graderRating, // required for live-interview when outcome === "passed"
   note,
+  // Details only the TA can supply, captured at signoff so the student's
+  // own session can auto-submit to Canvas without asking them anything.
+  // submitCanvasAssignment derives the student from the CALLER's token,
+  // so a TA can't submit on their behalf — the TA records, the student's
+  // client sends.
+  signoffHowLong, // performance exam: how long it took
+  signoffHowItWent, // live interview: the TA's summary
 }) {
   const path = `students/${studentNetID}/assignmentProgress/${assignmentId}`;
   const existing = (await fetchDoc(path)) ?? {};
@@ -135,6 +142,8 @@ export async function recordSignoffDecision({
     ...(taNetID ? { signoffTaNetID: taNetID } : {}),
     ...(Number.isInteger(graderRating) ? { graderRating } : {}),
     ...(note ? { signoffNote: note } : {}),
+    ...(signoffHowLong ? { signoffHowLong } : {}),
+    ...(signoffHowItWent ? { signoffHowItWent } : {}),
   };
   await patchDoc(path, newDoc);
   await patchLocalCache(assignmentId, newDoc);

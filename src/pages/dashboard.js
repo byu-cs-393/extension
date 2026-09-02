@@ -1,6 +1,8 @@
 import { fetchStudent, fetchCollection } from "../platform/firestore.js";
 import { getRole } from "../platform/auth.js";
 import { trackedActiveMsInWindow } from "../data/keystroke-analysis.js";
+import { pendingAutoSubmissions } from "../data/auto-submit.js";
+import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
   getVisibleWeeks,
   getCardsForWeek,
@@ -341,6 +343,64 @@ function createProblemItem(p, isSolved) {
   return li;
 }
 
+// Sends any Canvas submission a TA has already approved.
+//
+// Performance exams and live interviews used to leave a Submit button on
+// the card after a TA passed the student, asking them to re-type things
+// the TA already recorded. The TA now captures those at signoff and this
+// sends them — the student presses nothing.
+//
+// It runs from the STUDENT's session because submitCanvasAssignment
+// derives the student from the caller's token; a TA pressing Pass would
+// submit as themselves. So this happens the next time the student opens
+// the dashboard, not the instant Pass is clicked.
+//
+// Failures are deliberately quiet. The student didn't ask for this and
+// can't act on a Canvas error they didn't cause; the card falls back to
+// showing a Submit button, which is the old behaviour.
+async function runAutoSubmissions() {
+  if (!currentNetID || !currentCards) return;
+  const solutionUrls = currentSolves?.solutions ?? {};
+  let submittedAny = false;
+
+  for (const cards of currentCards) {
+    const pending = pendingAutoSubmissions(
+      cards.performanceItems,
+      currentAssignmentProgress,
+      { solutionUrls },
+    );
+    for (const submission of pending) {
+      try {
+        const outcome = await sendCanvasSubmission({
+          type: submission.type,
+          assignmentId: submission.assignmentId,
+          weekNum: cards.week,
+          netID: currentNetID,
+          data: submission.data,
+        });
+        if (outcome.ok) {
+          submittedAny = true;
+          console.log(
+            `[CS 393 Buddy] auto-submitted ${submission.assignmentId} to Canvas`,
+          );
+        } else {
+          console.error(
+            `[CS 393 Buddy] auto-submit failed for ${submission.assignmentId}:`,
+            outcome.result,
+          );
+        }
+      } catch (err) {
+        console.error("[CS 393 Buddy] auto-submit threw:", err);
+      }
+    }
+  }
+
+  if (submittedAny) {
+    currentAssignmentProgress = await getCachedAssignmentProgress();
+    renderWeeks();
+  }
+}
+
 // Re-reads keystroke session metadata and re-renders.
 //
 // Sessions are written by a content script in a different tab, so
@@ -407,6 +467,9 @@ async function initWeeks(netID) {
   currentOaShapes = Object.fromEntries(oaEntries);
   renderWeeks();
   startTimerLoop();
+  // After the first paint, so a slow Canvas round-trip never delays the
+  // dashboard appearing.
+  runAutoSubmissions();
 
   // Background progress refreshes — storage.onChanged fires re-render
   // when either bundle lands.

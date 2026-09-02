@@ -281,18 +281,33 @@ function unwrapFirestoreValue(valueObj) {
 async function applyDecision(item, outcome, passBtn, failBtn) {
   passBtn.disabled = true;
   failBtn.disabled = true;
+  const reEnable = () => {
+    passBtn.disabled = false;
+    failBtn.disabled = false;
+  };
 
   try {
     if (item.source === "assignmentProgress") {
-      // For live-interview Pass, prompt the TA for a 1/2/3 grader
-      // rating. Fail doesn't need a rating.
+      // On Pass, collect the things only the TA knows. These go onto the
+      // progress doc and the student's own session submits with them —
+      // the student never presses a button. Fail needs none of it.
       let graderRating;
-      if (item.progressType === "live-interview" && outcome === "passed") {
-        graderRating = promptForRating();
-        if (graderRating == null) {
-          passBtn.disabled = false;
-          failBtn.disabled = false;
-          return;
+      let signoffHowLong;
+      let signoffHowItWent;
+      if (outcome === "passed") {
+        if (item.progressType === "live-interview") {
+          graderRating = promptForRating();
+          if (graderRating == null) return reEnable();
+          signoffHowItWent = promptForText(
+            "How did the interview go? This goes into their Canvas submission.",
+          );
+          if (signoffHowItWent == null) return reEnable();
+        } else if (item.progressType === "performance") {
+          signoffHowLong = promptForText(
+            "How long did the exam take? e.g. \"12 min\"\n\n" +
+              "This goes into their Canvas submission.",
+          );
+          if (signoffHowLong == null) return reEnable();
         }
       }
       await recordSignoffDecision({
@@ -301,6 +316,8 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
         assignmentId: item.assignmentId,
         outcome,
         ...(graderRating != null ? { graderRating } : {}),
+        ...(signoffHowLong ? { signoffHowLong } : {}),
+        ...(signoffHowItWent ? { signoffHowItWent } : {}),
       });
     } else {
       // Legacy path — topicExam on weekProgress.
@@ -326,6 +343,14 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
 
 // Prompt the TA for a live-interview grader rating (1/2/3). Returns
 // the rating, or null if they cancel or type something invalid.
+// Free-text prompt that treats Cancel and an empty answer differently:
+// Cancel aborts the whole signoff, an empty string is a deliberate "leave
+// it blank". Returns null to abort.
+function promptForText(message) {
+  const raw = window.prompt(message);
+  return raw == null ? null : raw.trim();
+}
+
 function promptForRating() {
   const raw = window.prompt(
     "Grader rating for this live interview? Enter 1, 2, or 3.\n" +
