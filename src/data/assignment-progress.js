@@ -30,7 +30,7 @@
 //       status: "completed",
 //       completedAt, whoWith?, selfRating?: 1|2|3 }
 
-import { fetchCollection, fetchDoc, patchDoc } from "../platform/firestore.js";
+import { fetchCollection, patchDoc } from "../platform/firestore.js";
 
 export const ASSIGNMENT_PROGRESS_CACHE_KEY = "assignmentProgressBundle";
 
@@ -64,10 +64,19 @@ export async function refreshAssignmentProgress(netID) {
 
 // Update a single entry in the cache without a full refetch. Called
 // after a client-side write so the UI reacts within a paint frame.
+// Merges, matching what patchDoc does to Firestore. Replacing the entry
+// would drop fields the caller didn't name — canvasSubmittedAt from an
+// earlier cycle, say — leaving the cache disagreeing with the server
+// until the next refresh, and the card rendering the wrong state in
+// between.
 async function patchLocalCache(assignmentId, doc) {
   const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
   const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
-  bundle.progress = { ...(bundle.progress ?? {}), [assignmentId]: doc };
+  const existing = bundle.progress?.[assignmentId] ?? {};
+  bundle.progress = {
+    ...(bundle.progress ?? {}),
+    [assignmentId]: { ...existing, ...doc },
+  };
   bundle.syncedAt = Date.now();
   await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
 }
@@ -88,18 +97,24 @@ export async function requestSignoff({
   requestedTaNetID,
 }) {
   const now = Date.now();
-  const existing = (await fetchDoc(`students/${netID}/assignmentProgress/${assignmentId}`)) ?? {};
+  // No read-before-write. patchDoc sends an updateMask naming only these
+  // fields, so anything already on the doc is left untouched — the read
+  // was spreading existing values back over themselves for no effect.
+  //
+  // It also cost a request that 404s the first time a student requests
+  // anything, which is handled but shows up in the console looking like
+  // a failure.
+  //
+  // Fields from a previous decision (graderRating, signoffHowLong) are
+  // deliberately left in place: a re-request after a fail keeps the
+  // history, and the next Pass overwrites them.
   const newDoc = {
-    ...existing,
     assignmentId,
     type,
     ...(Number.isFinite(weekNum) ? { weekNum } : {}),
     status: "requested",
     requestedAt: now,
     ...(requestedTaNetID ? { requestedTaNetID } : {}),
-    // Clear any previous signoff decision fields — this is a fresh
-    // request. Leave graderRating / selfRating alone if the caller
-    // wants to re-request after a failed pass; they can wipe manually.
   };
   await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newDoc);
   await patchLocalCache(assignmentId, newDoc);
@@ -127,10 +142,10 @@ export async function recordSignoffDecision({
   signoffHowItWent, // live interview: the TA's summary
 }) {
   const path = `students/${studentNetID}/assignmentProgress/${assignmentId}`;
-  const existing = (await fetchDoc(path)) ?? {};
   const now = Date.now();
+  // Same as requestSignoff: no read-before-write. The updateMask names
+  // only these fields and leaves the rest of the document alone.
   const newDoc = {
-    ...existing,
     assignmentId,
     status: outcome,
     signoffAt: now,
