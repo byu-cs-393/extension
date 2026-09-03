@@ -22,6 +22,7 @@ import {
   primaryEditorId,
   eventsForEditor,
   trackedActiveMsInWindow,
+  correlatePastes,
   titleToSlug,
   slugToTitle,
   MAX_ACTIVE_GAP_MS,
@@ -57,6 +58,15 @@ const paste = (atMs, length, preview = "") => ({
   length,
   preview,
 });
+
+// A paste as it really arrives: the clipboard event, then the delta
+// Monaco emits a few ms later when it inserts the text. A paste with no
+// following delta is one that DIDN'T land, which the analysis now treats
+// differently — so fixtures have to say which they mean.
+const pasteLanding = (atMs, length, preview = "") => [
+  paste(atMs, length, preview),
+  { ...type(atMs + 5, "x".repeat(length)), offset: 0 },
+];
 
 const copy = (atMs, length, preview = "") => ({
   kind: "copy",
@@ -337,18 +347,20 @@ describe("summarizeSession", () => {
 
   it("rolls up a session into one object", () => {
     const chunks = [
-      { chunkIndex: 0, events: [type(0, "def "), type(500, "s"), paste(1000, 120, "return []")] },
+      { chunkIndex: 0, events: [type(0, "def "), type(500, "s"), ...pasteLanding(1000, 120, "return []")] },
       { chunkIndex: 1, events: [del(1500, 3), type(2000, "x")] },
     ];
     const summary = summarizeSession(session, chunks);
 
     expect(summary.sessionId).toBe("two-sum-123-abc");
     expect(summary.problemSlug).toBe("two-sum");
-    expect(summary.eventCount).toBe(5);
+    expect(summary.eventCount).toBe(6);
     expect(summary.activeMs).toBe(2000);
     expect(summary.elapsedMs).toBe(300_000);
     expect(summary.pastes).toHaveLength(1);
     expect(summary.pastedChars).toBe(120);
+    // "def " + "s" + "x" — the 120 pasted characters are NOT counted as
+    // typed, which is the whole point of correlating them.
     expect(summary.typing.insertedChars).toBe(6);
   });
 
@@ -402,12 +414,12 @@ describe("suspicionSignals", () => {
   });
 
   it("flags a large paste", () => {
-    const signals = suspicionSignals(summarize([type(0), paste(1000, 800, "class Solution:")]));
+    const signals = suspicionSignals(summarize([type(0), ...pasteLanding(1000, 800, "class Solution:")]));
     expect(signals.map((s) => s.code)).toContain("large-paste");
   });
 
   it("flags paste-dominant sessions", () => {
-    const signals = suspicionSignals(summarize([type(0, "ab"), paste(1000, 900)]));
+    const signals = suspicionSignals(summarize([type(0, "ab"), ...pasteLanding(1000, 900)]));
     expect(signals.map((s) => s.code)).toContain("paste-dominant");
   });
 
@@ -428,7 +440,7 @@ describe("suspicionSignals", () => {
 
   it("attaches an innocent reading to every signal", () => {
     // The UI contract: a TA never sees a signal without its counter-case.
-    const signals = suspicionSignals(summarize([type(0, "a"), paste(500, 900), ...typeRun(60, 100, 1000)]));
+    const signals = suspicionSignals(summarize([type(0, "a"), ...pasteLanding(500, 900), ...typeRun(60, 100, 1000)]));
     expect(signals.length).toBeGreaterThan(0);
     for (const signal of signals) {
       expect(signal.innocentReading).toBeTruthy();
@@ -439,7 +451,7 @@ describe("suspicionSignals", () => {
 
   it("emits no aggregate score or boolean verdict", () => {
     // Guards the design decision: signals are for a human to weigh.
-    const signals = suspicionSignals(summarize([paste(0, 900), ...typeRun(60, 100, 500)]));
+    const signals = suspicionSignals(summarize([...pasteLanding(0, 900), ...typeRun(60, 100, 500)]));
     for (const signal of signals) {
       expect(signal).not.toHaveProperty("score");
       expect(signal).not.toHaveProperty("suspicious");
@@ -708,5 +720,86 @@ describe("trackedActiveMsInWindow", () => {
     expect(trackedActiveMsInWindow([], T0, T0 + 1).activeMs).toBe(0);
     expect(trackedActiveMsInWindow(null, T0, T0 + 1).activeMs).toBe(0);
     expect(trackedActiveMsInWindow([session(T0, 1)], null, T0).activeMs).toBe(0);
+  });
+});
+
+describe("pastes vs typing", () => {
+  // A paste reaches the stream twice: the clipboard event, and the delta
+  // Monaco emits when it inserts. Treating those independently made
+  // pasted characters count as typed, drove the deletion ratio to zero,
+  // and double-counted a paste that never landed.
+  const landing = (at, length) => [
+    paste(at, length, "class Solution:"),
+    { ...type(at + 5, "x".repeat(length)), offset: 0 },
+  ];
+
+  it("does not count pasted characters as typed", () => {
+    const events = [...landing(0, 600), type(1000, "a")];
+    const { pastedDeltas } = correlatePastes(events);
+    const stats = typingStats(events, { pastedDeltas });
+    expect(stats.insertedChars).toBe(1);
+    expect(stats.deltaCount).toBe(1);
+  });
+
+  it("still counts pasted characters when not told to exclude them", () => {
+    // The default is unchanged, so callers opt in.
+    expect(typingStats([...landing(0, 600)]).insertedChars).toBe(600);
+  });
+
+  it("marks a paste that produced no edit as not landed", () => {
+    // Two attempts two seconds apart, one insert — the editor wasn't
+    // focused the first time. This is the duplicate "Pasted 607
+    // characters" pair seen in a real session.
+    const events = [paste(0, 607, "x"), ...landing(2000, 607)];
+    const { pastes } = correlatePastes(events);
+    expect(pastes.map((p) => p.landed)).toEqual([false, true]);
+  });
+
+  it("reports only the paste that landed, and counts the other", () => {
+    const summary = summarizeSession(
+      { sessionId: "s" },
+      [{ chunkIndex: 0, events: [paste(0, 607, "x"), ...landing(2000, 607)] }],
+    );
+    expect(summary.pastes).toHaveLength(1);
+    expect(summary.pastedChars).toBe(607);
+    expect(summary.unlandedPastes).toBe(1);
+  });
+
+  it("tolerates the editor normalising line endings", () => {
+    // CRLF in the clipboard becomes LF in the buffer, so the delta is
+    // shorter than the paste. An exact match would call this unlanded.
+    const events = [paste(0, 100, "x"), { ...type(5, "y".repeat(94)), offset: 0 }];
+    expect(correlatePastes(events).pastes[0].landed).toBe(true);
+  });
+
+  it("doesn't attribute an unrelated edit to a paste", () => {
+    // A single keystroke a second later is not the paste landing.
+    const events = [paste(0, 600, "x"), type(900, "a")];
+    expect(correlatePastes(events).pastes[0].landed).toBe(false);
+  });
+
+  it("doesn't match a delta beyond the window", () => {
+    const events = [paste(0, 600, "x"), { ...type(5000, "x".repeat(600)), offset: 0 }];
+    expect(correlatePastes(events).pastes[0].landed).toBe(false);
+  });
+
+  it("matches each paste to a different delta", () => {
+    // Two genuine pastes of the same size shouldn't both claim the first.
+    const events = [...landing(0, 300), ...landing(1500, 300)];
+    const { pastes, pastedDeltas } = correlatePastes(events);
+    expect(pastes.every((p) => p.landed)).toBe(true);
+    expect(pastedDeltas.size).toBe(2);
+  });
+
+  it("stops 'no backtracking' firing on a session that was pasted", () => {
+    // Pasting produces one insert and no deletions, which used to look
+    // exactly like typing a perfect solution straight through.
+    const summary = summarizeSession(
+      { sessionId: "s" },
+      [{ chunkIndex: 0, events: landing(0, 900) }],
+    );
+    const codes = suspicionSignals(summary).map((s) => s.code);
+    expect(codes).toContain("large-paste");
+    expect(codes).not.toContain("no-backtracking");
   });
 });

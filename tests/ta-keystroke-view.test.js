@@ -32,6 +32,13 @@ const paste = (at, length, preview = "class Solution:") => ({
   kind: "paste", t: at, wallMs: T0 + at, length, preview,
 });
 
+// Clipboard event plus the delta Monaco emits when it inserts. A paste
+// with no following delta is one that didn't land.
+const pasteLanding = (at, length, preview = "class Solution:") => [
+  paste(at, length, preview),
+  { ...type(at + 5, "x".repeat(length)), offset: 0 },
+];
+
 const session = (over = {}) => ({
   sessionId: "two-sum-1-abc",
   netID: "jack684",
@@ -285,7 +292,7 @@ describe("signals in the rendered panel", () => {
   });
 
   it("renders a signal card for a large paste", async () => {
-    const { deps } = fakeFirestore([type(0), paste(1000, 900)]);
+    const { deps } = fakeFirestore([type(0), ...pasteLanding(1000, 900)]);
     renderKeystrokeSection(container, "jack684", [session()], deps);
     await click($(".ks-session-head"));
 
@@ -297,7 +304,7 @@ describe("signals in the rendered panel", () => {
     // The UI contract. If this fails, the view has started making
     // accusations instead of observations.
     const metronomic = Array.from({ length: 60 }, (_, i) => type(i * 100));
-    const { deps } = fakeFirestore([...metronomic, paste(6100, 900)]);
+    const { deps } = fakeFirestore([...metronomic, ...pasteLanding(6100, 900)]);
     renderKeystrokeSection(container, "jack684", [session()], deps);
     await click($(".ks-session-head"));
 
@@ -312,7 +319,7 @@ describe("signals in the rendered panel", () => {
 
   it("uses the warning tone, never an error tone", async () => {
     // Guards the styling decision: nothing here is a finding.
-    const { deps } = fakeFirestore([type(0), paste(1000, 900)]);
+    const { deps } = fakeFirestore([type(0), ...pasteLanding(1000, 900)]);
     renderKeystrokeSection(container, "jack684", [session()], deps);
     await click($(".ks-session-head"));
 
@@ -322,7 +329,7 @@ describe("signals in the rendered panel", () => {
   });
 
   it("counts the flagged items in the heading", async () => {
-    const { deps } = fakeFirestore([type(0), paste(1000, 900)]);
+    const { deps } = fakeFirestore([type(0), ...pasteLanding(1000, 900)]);
     renderKeystrokeSection(container, "jack684", [session()], deps);
     await click($(".ks-session-head"));
 

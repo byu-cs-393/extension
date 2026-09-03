@@ -233,13 +233,81 @@ function hiddenOverlapMs(spans, from, to) {
   return overlap;
 }
 
+// ---- Pastes and the edits they produce ---------------------------------
+//
+// A paste shows up TWICE in the stream: once as a `paste` event from the
+// document listener, and once as a `delta` from Monaco actually inserting
+// the text. Treating those independently causes three wrong readings, all
+// seen in a real session:
+//
+//   - pasted characters counted as typed
+//   - a paste-only session showing zero deletions, so "no backtracking"
+//     fires on someone who typed nothing at all
+//   - a paste that never landed still counted, doubling the total
+//
+// So each paste is matched to the delta it produced. A paste with no
+// matching delta didn't take effect — usually the editor wasn't focused,
+// and the student pastes again a second later. That's the duplicate
+// "Pasted 607 characters" pair: two attempts, one insert.
+//
+// Matching is by time and size rather than content, because the delta
+// doesn't carry the text for large inserts and the editor may normalise
+// line endings or re-indent on the way in.
+
+export const PASTE_MATCH_WINDOW_MS = 1000;
+
+// Monaco can insert slightly less than was copied (CRLF collapsing to LF)
+// or slightly more (auto-indent), so an exact length match is too strict.
+const PASTE_MIN_RATIO = 0.5;
+const PASTE_MAX_RATIO = 1.5;
+
+// Returns { pastes, pastedDeltas } where `pastes` carries a `landed` flag
+// and `pastedDeltas` is a Set of the delta objects a paste produced.
+export function correlatePastes(events, { windowMs = PASTE_MATCH_WINDOW_MS } = {}) {
+  const ordered = events ?? [];
+  const pastedDeltas = new Set();
+  const pastes = [];
+
+  for (const paste of ordered) {
+    if (paste?.kind !== "paste") continue;
+    const length = Number.isFinite(paste.length) ? paste.length : 0;
+
+    let match = null;
+    for (const event of ordered) {
+      if (event.kind !== "delta") continue;
+      if (pastedDeltas.has(event)) continue;
+      const gap = event.wallMs - paste.wallMs;
+      // The paste event fires before the editor applies it, so the delta
+      // always follows. A tiny negative gap is clock jitter between the
+      // two capture paths, not a delta that preceded the paste.
+      if (gap < -50 || gap > windowMs) continue;
+      const inserted = typeof event.text === "string" ? event.text.length : 0;
+      if (length > 0 && inserted < length * PASTE_MIN_RATIO) continue;
+      if (length > 0 && inserted > length * PASTE_MAX_RATIO) continue;
+      if (length === 0 && inserted !== 0) continue;
+      match = event;
+      break;
+    }
+
+    if (match) pastedDeltas.add(match);
+    pastes.push({ ...paste, landed: Boolean(match) });
+  }
+
+  return { pastes, pastedDeltas };
+}
+
 // ---- Typing shape ------------------------------------------------------
 
 // Monaco reports a delta as "replace `length` chars at `offset` with
 // `text`". So a pure insert has length 0, a pure delete has empty text,
 // and a selection-overwrite has both.
-export function typingStats(events) {
-  const deltas = eventsOfKind(events, "delta");
+// `pastedDeltas` (from correlatePastes) is excluded, so these describe
+// what the student actually TYPED. Counting a paste as typing inflates
+// insertedChars and drives the deletion ratio to zero, which is what made
+// "almost no edits or deletions" fire on a session that was pasted rather
+// than written.
+export function typingStats(events, { pastedDeltas = new Set() } = {}) {
+  const deltas = eventsOfKind(events, "delta").filter((d) => !pastedDeltas.has(d));
   let insertedChars = 0;
   let deletedChars = 0;
   let insertCount = 0;
@@ -341,8 +409,17 @@ export function summarizeSession(session, chunks, opts = {}) {
   // "typed it straight through" signals.
   const editorIds = editorIdsIn(events);
   const editorId = primaryEditorId(events);
-  const typing = typingStats(eventsForEditor(events, editorId));
-  const pastes = pasteEvents(events, opts);
+  // Pastes are correlated across ALL events, because the paste listener
+  // is document-level and doesn't know which editor received it.
+  const { pastes: correlated, pastedDeltas } = correlatePastes(events, opts);
+  const typing = typingStats(eventsForEditor(events, editorId), { pastedDeltas });
+  // Only pastes that actually reached the editor. One that didn't land
+  // inserted nothing, so counting it would double a single paste.
+  const landed = correlated.filter((p) => p.landed);
+  const minLength = opts.minLength ?? NOTABLE_PASTE_CHARS;
+  const pastes = landed
+    .filter((p) => Number.isFinite(p.length) && p.length >= minLength)
+    .map((p) => ({ wallMs: p.wallMs, length: p.length, preview: p.preview ?? "" }));
   const copies = copyEvents(events, opts);
   const active = activeMs(events, opts);
 
@@ -376,6 +453,10 @@ export function summarizeSession(session, chunks, opts = {}) {
     pastes,
     copies,
     pastedChars: pastes.reduce((sum, p) => sum + p.length, 0),
+    // Attempts that produced no edit. Not a finding on its own — a
+    // mis-focused paste is ordinary — but it explains why a TA might
+    // remember more pasting than the numbers show.
+    unlandedPastes: correlated.length - landed.length,
   };
 }
 
