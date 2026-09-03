@@ -144,6 +144,12 @@ const sizeKb = Math.round(readFileSync(zipPath).length / 1024);
 console.log(`\nBuilt release/cs393-buddy-${version}.zip (${sizeKb} KB)`);
 console.log("Install instructions: release/INSTALL.md");
 console.log(
-  "\nSend students BOTH files. Remind them to unzip somewhere permanent —\n" +
-    "Chrome loads from that exact folder every time it starts.",
+  `\nTo publish:
+  1. Bump "version" in src/manifest.json and re-run this
+  2. git tag v${version} && git push origin v${version}
+  3. GitHub -> Releases -> Draft a new release, attach the zip above
+  4. Tell students: https://github.com/byu-cs-393/extension/releases/latest
+
+Students need the zip only — INSTALL.md is in the repo and linked from
+the release page.`,
 );

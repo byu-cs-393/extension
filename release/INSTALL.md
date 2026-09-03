@@ -3,9 +3,15 @@
 Ten minutes, once. You'll need Chrome (or Edge/Brave — anything
 Chromium-based) and your BYU Canvas login.
 
-## 1. Unzip it somewhere permanent
+## 1. Download and unzip it somewhere permanent
 
-Download `cs393-buddy-0.0.1.zip` and unzip it.
+Go to **https://github.com/byu-cs-393/extension/releases/latest** and
+download `cs393-buddy-<version>.zip` from the Assets list at the bottom.
+Then unzip it.
+
+Download the **zip from the release**, not the repository's green "Code"
+button — that gives you the whole project, and Chrome won't know which
+folder to load.
 
 **Put the folder somewhere you won't move or delete it** — Documents is
 fine, Downloads is not. Chrome loads the extension from that exact folder
@@ -96,14 +102,18 @@ we're piloting; dismissing it is fine. Don't click "Disable".
 
 ## Updates
 
-No auto-updates while we're piloting. If a TA sends a new zip:
+No auto-updates while we're piloting. When a new version is announced:
 
-1. Unzip it over the old folder (replace everything)
-2. `chrome://extensions` → the reload icon ↻ on CS 393 Buddy
-3. **Reload any open LeetCode tabs** — this step gets missed, and until
+1. Download the new zip from
+   **https://github.com/byu-cs-393/extension/releases/latest**
+2. Unzip it over the old folder, replacing everything
+3. `chrome://extensions` → the reload icon ↻ on CS 393 Buddy
+4. **Reload any open LeetCode tabs** — this step gets missed, and until
    you do it that tab isn't recording
 
-Your data lives in the cloud, not in the folder. Updating loses nothing.
+Your data lives in the cloud, not in the folder, so updating loses
+nothing. The version you have is shown on the extension's card at
+`chrome://extensions`.
 
 ## Removing it
 
