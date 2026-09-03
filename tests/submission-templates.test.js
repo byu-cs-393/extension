@@ -119,16 +119,22 @@ describe("fillPerformanceTemplate", () => {
 });
 
 describe("fillLiveInterviewTemplate", () => {
-  it("emits all four labeled fields", () => {
+  it("emits the three labeled fields", () => {
     const body = fillLiveInterviewTemplate({
-      date: "2026-09-24",
-      howItWent: "Nailed it",
-      selfRating: 3,
-      acceptedUrl: "https://leetcode.com/problems/x/",
+      date: "2026-09-15",
+      howItWent: "Strong communication throughout.",
+      graderRating: "3",
     });
-    expect(body).toContain("<strong>How did it go?:</strong> Nailed it");
-    expect(body).toContain("<strong>Self-rating (1-3):</strong> 3");
-    expect(body).toContain('<a href="https://leetcode.com/problems/x/">');
+    expect(body).toContain("<strong>Date you did it:</strong> 2026-09-15");
+    expect(body).toContain("<strong>How did it go?:</strong> Strong communication throughout.");
+    expect(body).toContain("<strong>TA rating (1-3):</strong> 3");
+  });
+
+  it("attributes the rating to the TA, not the student", () => {
+    // A TA's number under a "Self-rating" heading misreports who said it.
+    const body = fillLiveInterviewTemplate({ graderRating: "3" });
+    expect(body).toContain("TA rating");
+    expect(body).not.toMatch(/self-rating/i);
   });
 });
 

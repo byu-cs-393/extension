@@ -117,16 +117,20 @@ describe("live interviews", () => {
     expect(out.data.date).toBe("2026-09-15");
   });
 
-  it("does NOT pass the grader's rating off as the student's self-rating", () => {
-    // They measure different things, and a TA's 3 in a field labelled
-    // "Self-rating" misreports who said it.
+  it("carries the TA's rating, labelled as the TA's", () => {
     const out = autoSubmission(liveItem(), passed({ graderRating: 3 }));
-    expect(out.data.selfRating).toBe("");
+    expect(out.data.graderRating).toBe("3");
   });
 
-  it("includes the self-rating once the student has actually given one", () => {
-    const out = autoSubmission(liveItem(), passed({ graderRating: 3, selfRating: 2 }));
-    expect(out.data.selfRating).toBe("2");
+  it("asks the student for nothing at all", () => {
+    // No self-rating field: making a student grade themselves after a TA
+    // had already signed them off was the last manual step in this flow.
+    const out = autoSubmission(liveItem(), passed({ graderRating: 3 }));
+    expect(Object.keys(out.data).sort()).toEqual(["date", "graderRating", "howItWent"]);
+  });
+
+  it("survives a TA who skipped the rating", () => {
+    expect(autoSubmission(liveItem(), passed()).data.graderRating).toBe("");
   });
 });
 
@@ -149,5 +153,35 @@ describe("pendingAutoSubmissions", () => {
   it("returns nothing for an empty week", () => {
     expect(pendingAutoSubmissions([], {})).toEqual([]);
     expect(pendingAutoSubmissions(null, null)).toEqual([]);
+  });
+});
+
+describe("the student's only action is requesting", () => {
+  // The flow is: pick a TA, request. Everything after that is the TA's,
+  // and the submission goes out on its own. Nothing here should ever
+  // produce a field a student has to fill in.
+  it("needs nothing from the student for either type", () => {
+    const perf = autoSubmission(perfItem(), passed({ signoffHowLong: "12 min" }));
+    const live = autoSubmission(liveItem(), passed({ signoffHowItWent: "Good", graderRating: 2 }));
+
+    for (const out of [perf, live]) {
+      for (const value of Object.values(out.data)) {
+        expect(typeof value === "string" || typeof value === "number").toBe(true);
+      }
+    }
+    // Every value traces to the signoff or the clock — none to a form.
+    expect(perf.data.workedWith).toBe("jack684");
+    expect(perf.data.howLong).toBe("12 min");
+    expect(live.data.howItWent).toBe("Good");
+    expect(live.data.graderRating).toBe("2");
+  });
+
+  it("retries on the next load rather than needing a button", () => {
+    // Nothing marks a failed attempt, so an unsubmitted pass stays
+    // pending and the next dashboard load tries again. That's why the
+    // card can safely have no fallback button.
+    const progress = passed({ signoffHowLong: "12 min" });
+    expect(autoSubmission(perfItem(), progress)).not.toBe(null);
+    expect(autoSubmission(perfItem(), progress)).not.toBe(null);
   });
 });

@@ -50,17 +50,19 @@ const SCHEMAS_BY_TYPE = {
       { name: "attemptNum", label: "Attempt you passed on", type: "number", required: true, min: 1 },
     ],
   },
+  // Filled entirely by the TA at signoff — see src/data/auto-submit.js.
+  // The student never opens this form; the schema exists so the template
+  // dispatcher and any manual resubmission still have field definitions.
   "live-interview": {
     title: "Submit Live Interview to Canvas",
     fields: [
       { name: "date", label: "Date you did it", type: "date", required: true },
       { name: "howItWent", label: "How did it go?", type: "textarea", required: true, placeholder: "A few sentences on how the interview went…" },
-      { name: "selfRating", label: "Self-rating (1–3)", type: "select", required: true, options: [
+      { name: "graderRating", label: "TA rating (1–3)", type: "select", options: [
           { value: "1", label: "1 — Showed up, went poorly" },
           { value: "2", label: "2 — Got to a solution" },
           { value: "3", label: "3 — Collaborated well, want to hire" },
         ] },
-      { name: "acceptedUrl", label: "Link to your solution", type: "url", required: true },
     ],
   },
   "peer-mock": {

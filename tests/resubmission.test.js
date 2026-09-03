@@ -14,7 +14,7 @@ vi.mock("../src/data/oa-session.js", () => ({
   formatRemaining: vi.fn(), solvedInWindow: vi.fn(() => new Set()), resetOa: vi.fn(),
 }));
 vi.mock("../src/data/assignment-progress.js", () => ({
-  requestSignoff: vi.fn(), submitSelfRating: vi.fn(),
+  requestSignoff: vi.fn(),
 }));
 vi.mock("../src/data/submission-templates.js", () => ({ fillOaTemplate: vi.fn(() => "") }));
 

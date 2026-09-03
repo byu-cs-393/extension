@@ -41,9 +41,9 @@ import {
   solvedInWindow,
   resetOa,
 } from "../data/oa-session.js";
-import { requestSignoff, submitSelfRating } from "../data/assignment-progress.js";
+import { requestSignoff } from "../data/assignment-progress.js";
 import { fillOaTemplate } from "../data/submission-templates.js";
-import { openSubmissionForm, sendCanvasSubmission } from "./submission-form.js";
+import { openSubmissionForm } from "./submission-form.js";
 import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
@@ -176,18 +176,7 @@ function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
 
   if (status === "passed") {
     addStatusLine(article, "✓ Passed", "complete");
-    // No Submit button on the happy path: the TA recorded the duration at
-    // signoff and dashboard.js sends it. See src/data/auto-submit.js.
-    // appendAutoSubmitState still offers a manual button if that failed,
-    // so a Canvas outage can't strand the submission.
-    appendAutoSubmitState(article, item, ap, ctx, {
-      prefill: {
-        date: todayIso(),
-        workedWith: ap?.signoffTaNetID ?? "",
-        howLong: ap?.signoffHowLong ?? "",
-        attemptNum: 1,
-      },
-    });
+    appendAutoSubmitState(article, ap);
     // Retakeable — rare but supported.
     appendRequestButton(article, item, ap, ctx, "Request re-signoff");
     return article;
@@ -291,7 +280,7 @@ function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
   const article = makeCard();
   const titleLabel = item.index ? `Live Interview ${item.index}` : "Live Interview";
   addTitle(article, titleLabel);
-  addDetail(article, "Schedule with a TA or the instructor. Self-rate 1/2/3 after.");
+  addDetail(article, "Request a signoff — the TA records the rest afterwards.");
 
   const ap = ctx?.assignmentProgress?.[item.assignmentId] ?? null;
   const status = ap?.status ?? "available";
@@ -303,24 +292,7 @@ function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
     } else {
       addStatusLine(article, "✓ Passed", "complete");
     }
-    if (Number.isInteger(ap?.selfRating)) {
-      addDetail(article, `Your self-rating: ${ap.selfRating}/3`);
-    } else {
-      // Prompt the student to self-rate — required to fully complete
-      // the live interview per the professor's rubric. Choosing a rating
-      // also updates the Canvas submission, so this is the only thing
-      // they have to press.
-      appendSelfRatingRow(article, item, ap, ctx);
-    }
-    appendAutoSubmitState(article, item, ap, ctx, {
-      prefill: {
-        date: todayIso(),
-        howItWent: ap?.signoffHowItWent ?? "",
-        ...(Number.isInteger(ap?.selfRating)
-          ? { selfRating: String(ap.selfRating) }
-          : {}),
-      },
-    });
+    appendAutoSubmitState(article, ap);
     // Live interviews are always retakeable — the professor explicitly
     // wants students to try before they feel ready.
     appendRequestButton(article, item, ap, ctx, "Request another");
@@ -338,63 +310,6 @@ function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
   if (status === "failed") addStatusLine(article, "✗ Failed", "incomplete");
   appendRequestButton(article, item, ap, ctx, label);
   return article;
-}
-
-// Inline 1 / 2 / 3 button row for the student's self-rating on a
-// passed live interview. Writes to assignmentProgress via
-// submitSelfRating; the storage listener fires re-render immediately.
-// The rating buttons double as the submit action.
-//
-// The interview is auto-submitted when the TA passes it, with the
-// self-rating blank — the TA's grader rating measures something else and
-// putting it in a field labelled "self-rating" would misreport who said
-// it. Once the student rates, this resubmits so Canvas has the complete
-// picture. Canvas grades the newest attempt, so the second submission
-// supersedes the first.
-function appendSelfRatingRow(article, item, progress, ctx) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "card-actions self-rating-row";
-
-  const label = document.createElement("span");
-  label.className = "card-detail self-rating-label";
-  label.textContent = "Self-rate:";
-  wrapper.appendChild(label);
-
-  for (const n of [1, 2, 3]) {
-    const btn = document.createElement("button");
-    btn.className = "btn-primary self-rating-btn";
-    btn.textContent = String(n);
-    btn.addEventListener("click", async () => {
-      if (!ctx?.netID || !item?.assignmentId) return;
-      try {
-        await submitSelfRating({
-          netID: ctx.netID,
-          assignmentId: item.assignmentId,
-          selfRating: n,
-        });
-        // Resend so the rating reaches Canvas. Best-effort: the rating is
-        // saved either way, and the card still offers a manual submit if
-        // this fails.
-        await sendCanvasSubmission({
-          type: item.type,
-          assignmentId: item.assignmentId,
-          weekNum: ctx.weekNum,
-          netID: ctx.netID,
-          data: {
-            date: todayIso(),
-            howItWent: progress?.signoffHowItWent ?? "",
-            selfRating: String(n),
-            acceptedUrl: progress?.canvasSubmissionData?.acceptedUrl ?? "",
-          },
-        });
-      } catch (err) {
-        console.error("[CS 393 Buddy] self-rate failed:", err);
-        alert("Couldn't save your self-rating. Try again in a moment.");
-      }
-    });
-    wrapper.appendChild(btn);
-  }
-  article.appendChild(wrapper);
 }
 
 function renderCourseProfessionalMock(item, _progress, _weekStatus, ctx) {
@@ -485,25 +400,28 @@ function addDetail(article, text) {
   article.appendChild(el);
 }
 
-// For assignments a TA signs off: the submission is sent automatically
-// from the student's own session, so the normal case shows a receipt and
-// no button at all.
+// For assignments a TA signs off, the student does nothing after
+// requesting: the TA records what only they know, and the submission goes
+// out from the student's own session on their next dashboard load.
 //
-// The fallback matters though. Auto-submit can fail — Canvas down, token
-// expired, a student who never reopens the dashboard — and a card that
-// only ever says "Passed" would leave them with no way to file it. So an
-// un-submitted pass still offers the manual path, which is exactly the
-// old behaviour.
-function appendAutoSubmitState(article, item, progress, ctx, opts = {}) {
+// Deliberately NO submit button, not even as a fallback. A button here
+// reads as "you still have to do this", which is exactly the step being
+// removed — and it isn't needed, because auto-submit retries on every
+// dashboard load until canvasSubmittedAt is set. A Canvas outage delays
+// the submission; it can't strand it.
+function appendAutoSubmitState(article, progress) {
   if (progress?.canvasSubmittedAt) {
-    appendCanvasSubmitAffordance(article, item, progress, ctx, opts);
+    const line = document.createElement("div");
+    line.className = "card-detail canvas-submit-receipt";
+    line.textContent =
+      `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
+    article.appendChild(line);
     return;
   }
   const pending = document.createElement("div");
   pending.className = "card-detail";
   pending.textContent = "Submitting to Canvas…";
   article.appendChild(pending);
-  appendCanvasSubmitAffordance(article, item, progress, ctx, opts);
 }
 
 // An out-of-extension link (Teams, docs). Opens in a new tab; noopener so

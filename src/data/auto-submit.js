@@ -61,19 +61,19 @@ export function autoSubmission(item, progress) {
     };
   }
 
-  // live-interview. The student's own 1/2/3 self-rating is deliberately
-  // NOT filled from the TA's grader rating — they measure different
-  // things, and putting the TA's number in a field labelled "self-rating"
-  // would misreport who said it. It goes out blank and fills in when the
-  // student rates, which triggers a resubmission.
+  // live-interview. Everything comes from the TA, and the rating is
+  // labelled as theirs. There is no student self-rating: asking a student
+  // to grade themselves after a TA had already signed them off was the
+  // last thing keeping a manual step in this flow.
   return {
     assignmentId: item.assignmentId,
     type: item.type,
     data: {
       date,
       howItWent: progress.signoffHowItWent ?? "",
-      selfRating: progress.selfRating != null ? String(progress.selfRating) : "",
-      acceptedUrl: "",
+      graderRating: Number.isInteger(progress.graderRating)
+        ? String(progress.graderRating)
+        : "",
     },
   };
 }

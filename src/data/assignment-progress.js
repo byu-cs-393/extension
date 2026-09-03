@@ -17,7 +17,8 @@
 //     { assignmentId, type: "live-interview",
 //       status: "requested" | "passed" | "failed",
 //       requestedAt, signoffAt?, signoffTaNetID?,
-//       graderRating?: 1|2|3, selfRating?: 1|2|3, signoffNote? }
+//       graderRating?: 1|2|3, signoffNote?,
+//       signoffHowLong?, signoffHowItWent?, requestedTaNetID? }
 //
 //   peer-mock:
 //     { assignmentId, type: "peer-mock", weekNum,
@@ -100,22 +101,6 @@ export async function requestSignoff({
     // request. Leave graderRating / selfRating alone if the caller
     // wants to re-request after a failed pass; they can wipe manually.
   };
-  await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newDoc);
-  await patchLocalCache(assignmentId, newDoc);
-  return newDoc;
-}
-
-// Student self-rates a live interview (or peer/pro mock, later).
-// Preserves everything else.
-export async function submitSelfRating({ netID, assignmentId, selfRating }) {
-  if (![1, 2, 3].includes(selfRating)) {
-    throw new Error(`selfRating must be 1|2|3, got: ${selfRating}`);
-  }
-  const existing = await fetchDoc(`students/${netID}/assignmentProgress/${assignmentId}`);
-  if (!existing) {
-    throw new Error(`No assignmentProgress doc to self-rate: ${assignmentId}`);
-  }
-  const newDoc = { ...existing, selfRating };
   await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newDoc);
   await patchLocalCache(assignmentId, newDoc);
   return newDoc;

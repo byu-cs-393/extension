@@ -97,17 +97,15 @@ export function fillPerformanceTemplate({
 
 // Live Interview. Same treatment as Performance — no booking banner.
 // Ref: `_template_md`, `typ == "live-interview"`.
-export function fillLiveInterviewTemplate({
-  date,
-  howItWent,
-  selfRating,
-  acceptedUrl,
-}) {
+// The rating here is the TA's, and is labelled as such. There is no
+// student self-rating: it asked the student to come back and grade
+// themselves after a TA had already signed them off, which was the last
+// thing keeping a manual step in this flow.
+export function fillLiveInterviewTemplate({ date, howItWent, graderRating }) {
   return (
     pLabelValue("Date you did it", date) +
     pLabelValue("How did it go?", howItWent) +
-    pLabelValue("Self-rating (1-3)", selfRating) +
-    pLabelUrl("Link to your solution", acceptedUrl)
+    pLabelValue("TA rating (1-3)", graderRating)
   );
 }
 
