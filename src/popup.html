@@ -20,8 +20,8 @@
     <section id="popup-welcome" class="welcome" hidden>
       <h1 class="welcome-title">Welcome!</h1>
       <p class="welcome-copy">
-        CS 393 Buddy tracks your weekly LeetCode work, reports your grade
-        to Canvas, and lets you request topic exam signoffs.
+        CS 393 Buddy tracks your weekly LeetCode work, submits it to
+        Canvas for you, and lets you request signoffs from a TA.
       </p>
       <p class="welcome-copy welcome-note">
         Setup takes about 2 minutes.
@@ -42,25 +42,23 @@
             class="progress-bar"
             role="progressbar"
             aria-valuemin="0"
-            aria-valuemax="7"
+            aria-valuemax="0"
             aria-valuenow="0"
             id="popup-progress-bar"
           >
             <div class="progress-fill" id="popup-progress-fill"></div>
           </div>
-          <div class="progress-text" id="popup-progress-text">— / 7</div>
+          <div class="progress-text" id="popup-progress-text">— / —</div>
         </div>
         <div class="card-detail" id="popup-detail">Visit leetcode.com to sync progress.</div>
         <button type="button" class="btn-primary" id="popup-next-btn" hidden>Next problem →</button>
       </article>
 
-      <article class="card">
-        <div class="card-title">Topic Exam · Hash Maps</div>
-        <div class="card-warning">
-          <span class="warning-icon" aria-hidden="true">⚠</span>
-          <span>Due Wed</span>
-        </div>
-        <button type="button" class="btn-primary">Request signoff</button>
+      <!-- This week's assessments, filled by popup.js from course.json.
+           Hidden when the week has none. -->
+      <article class="card" id="popup-assessments" hidden>
+        <div class="card-title">This week</div>
+        <ul class="card-list" id="popup-assessment-list"></ul>
       </article>
 
       <div class="dashboard-link">
@@ -68,12 +66,16 @@
       </div>
     </section>
 
+    <!-- Settings and Compete used to live here as dead links to features
+         that don't exist. What's left is real: what the extension records
+         and who can see it. -->
     <footer class="footer" id="popup-footer" hidden>
-      <a href="#" role="button">⚙ Settings</a>
-      <span class="footer-sep" aria-hidden="true">·</span>
-      <a href="#" role="button">🔒 Your data</a>
-      <span class="footer-sep" aria-hidden="true">·</span>
-      <a href="#" role="button">🏆 Compete</a>
+      <a
+        href="https://cs393-496021.web.app/privacy.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        >🔒 What this records</a
+      >
     </footer>
 
     <script type="module" src="pages/popup.js"></script>

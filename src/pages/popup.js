@@ -4,6 +4,7 @@ import {
   flattenPlacementsToProblems,
   firstUnsolvedProblem,
 } from "../data/course-data.js";
+import { getCachedAssignmentProgress } from "../data/assignment-progress.js";
 
 // Both panels + the sync pill and footer — the popup toggles between
 // the pre-onboarding welcome and the normal current-week view based on
@@ -21,14 +22,18 @@ const text = document.getElementById("popup-progress-text");
 const detail = document.getElementById("popup-detail");
 const nextBtn = document.getElementById("popup-next-btn");
 const openDashboardBtn = document.getElementById("open-dashboard");
+const assessmentsCard = document.getElementById("popup-assessments");
+const assessmentList = document.getElementById("popup-assessment-list");
 
 // Module-scoped state — render() reads from these.
 let currentCards = null;
 let currentSolves = null;
+let currentAssignmentProgress = {};
 
 function render() {
   if (!currentCards) {
     weekLabel.textContent = "No active week";
+    assessmentsCard.hidden = true;
     text.textContent = "— / —";
     fill.style.width = "0%";
     fill.className = "progress-fill";
@@ -51,6 +56,8 @@ function render() {
   bar.setAttribute("aria-valuenow", String(solved));
   bar.setAttribute("aria-valuemax", String(total));
 
+  renderAssessments();
+
   const next = firstUnsolvedProblem(currentCards, currentSolves);
   if (next) {
     detail.textContent = `Currently on: ${next.title}`;
@@ -60,6 +67,42 @@ function render() {
     detail.textContent = "✓ All recommended problems solved this week.";
     nextBtn.hidden = true;
     delete nextBtn.dataset.slug;
+  }
+}
+
+// This week's assessments, read from course.json rather than hardcoded.
+// The popup is a glance, not a control surface — it says what's there and
+// where each one stands, and the dashboard button is the way to act on
+// any of it.
+function renderAssessments() {
+  const items = currentCards?.performanceItems ?? [];
+  assessmentList.innerHTML = "";
+  if (items.length === 0) {
+    assessmentsCard.hidden = true;
+    return;
+  }
+  assessmentsCard.hidden = false;
+  for (const item of items) {
+    const li = document.createElement("li");
+    const status = assessmentStatus(item);
+    li.textContent = status ? `${item.title} — ${status}` : item.title;
+    if (status?.startsWith("✓")) li.className = "complete";
+    assessmentList.appendChild(li);
+  }
+}
+
+function assessmentStatus(item) {
+  const progress = currentAssignmentProgress?.[item.assignmentId];
+  if (progress?.canvasSubmittedAt) return "✓ submitted";
+  switch (progress?.status) {
+    case "passed":
+      return "✓ passed";
+    case "requested":
+      return "signoff requested";
+    case "failed":
+      return "not yet passed";
+    default:
+      return null;
   }
 }
 
@@ -87,12 +130,14 @@ async function init() {
     return;
   }
   showOnboarded();
-  const [cards, { solvedProblems }] = await Promise.all([
+  const [cards, { solvedProblems }, assignmentProgress] = await Promise.all([
     getCurrentWeekCards(),
     chrome.storage.local.get("solvedProblems"),
+    getCachedAssignmentProgress(),
   ]);
   currentCards = cards;
   currentSolves = solvedProblems ?? null;
+  currentAssignmentProgress = assignmentProgress ?? {};
   render();
 }
 
@@ -100,6 +145,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   if (changes.solvedProblems) {
     currentSolves = changes.solvedProblems.newValue ?? null;
+    render();
+  }
+  if (changes.assignmentProgressBundle) {
+    currentAssignmentProgress =
+      changes.assignmentProgressBundle.newValue?.progress ?? {};
     render();
   }
 });
