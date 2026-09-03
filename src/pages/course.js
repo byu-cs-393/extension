@@ -105,7 +105,9 @@ function createWeekSection(cards, status) {
   } else if (status === "future" && cards.startMs != null) {
     const badge = document.createElement("span");
     badge.className = "week-badge locked";
-    badge.textContent = `🔒 Released ${SHORT_DATE.format(new Date(cards.startMs))}`;
+    // Only the problem list is gated now, so say so rather than implying
+    // the whole week is locked.
+    badge.textContent = `Problems unlock ${SHORT_DATE.format(new Date(cards.startMs))}`;
     title.appendChild(badge);
   }
 
@@ -116,15 +118,14 @@ function createWeekSection(cards, status) {
   header.append(title, dates);
   section.appendChild(header);
 
-  if (status === "future") {
-    // Future weeks: read-only preview. No problem list (no peeking),
-    // no interactive third cards. Just a placeholder card + a summary
-    // of the assessments coming.
-    section.appendChild(createFuturePlaceholder(cards));
-    return section;
-  }
-
-  section.appendChild(createRecommendedCard(cards, status));
+  // Future weeks keep their problem list hidden — the professor's point
+  // is that you meet the week's problems in the week. The ASSESSMENTS are
+  // a different matter: a student ready to sit a performance exam or book
+  // a live interview early shouldn't be told to come back in October, so
+  // those cards render for real at any point in the course.
+  section.appendChild(
+    status === "future" ? createFuturePlaceholder(cards) : createRecommendedCard(cards, status),
+  );
   for (const item of cards.performanceItems ?? []) {
     const cardEl = createThirdCardSection(
       item,
@@ -166,33 +167,9 @@ function createFuturePlaceholder(cards) {
       : `Will unlock ${startText}.`;
   article.appendChild(meta);
 
-  for (const item of cards.performanceItems ?? []) {
-    const line = document.createElement("div");
-    line.className = "card-detail";
-    line.textContent = "+ " + performanceItemLabel(item);
-    article.appendChild(line);
-  }
+  // The assessments used to be listed here as "+ Peer Mock" lines. They
+  // render as real cards below now, so listing them would just duplicate.
   return article;
-}
-
-function performanceItemLabel(item) {
-  if (item.title) return item.title;
-  switch (item.type) {
-    case "oa":
-      return `Online Assessment · ${item.topic ?? ""}`.trim();
-    case "performance":
-      return `Performance Exam · ${item.topic ?? ""}`.trim();
-    case "peer-mock":
-      return "Peer Mock Interview";
-    case "live-interview":
-      return item.index ? `Live Interview ${item.index}` : "Live Interview";
-    case "professional-mock":
-      return "Professional Mock Interview";
-    case "final":
-      return item.phase ? `Final Exam (${item.phase})` : "Final Exam";
-    default:
-      return item.type ?? "";
-  }
 }
 
 function createRecommendedCard(cards, status) {
