@@ -638,3 +638,20 @@ body {
   font-style: italic;
   line-height: 1.5;
 }
+
+/* Who a student is meeting for a signoff. Sits inline with the request
+   button rather than above it — the two are one decision. */
+.signoff-ta-select {
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--card-bg);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.signoff-ta-select:hover {
+  border-color: var(--text-tertiary);
+}

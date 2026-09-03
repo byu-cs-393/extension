@@ -13,6 +13,7 @@ import {
   getTopics,
   studyProblemsForWeek,
   studyAssignmentIdForWeek,
+  getSignoffStaff,
 } from "../data/course-data.js";
 import {
   createThirdCardSection,
@@ -51,6 +52,8 @@ let currentAssignmentProgress = {}; // { [assignmentId]: doc }
 // Keystroke session METADATA only — enough for per-week active time
 // without pulling every session's events.
 let currentKeystrokeSessions = [];
+// Who a student can request a signoff from, from course.json.
+let currentSignoffStaff = [];
 
 async function getNetID() {
   const { netID } = await chrome.storage.sync.get("netID");
@@ -160,6 +163,7 @@ function createWeekSection(cards, status) {
         solutionUrls: currentSolves?.solutions ?? {},
         oaShapes: currentOaShapes,
         assignmentProgress: currentAssignmentProgress,
+        signoffStaff: currentSignoffStaff,
       },
     );
     if (cardEl) section.appendChild(cardEl);
@@ -360,14 +364,12 @@ function createProblemItem(p, isSolved) {
 // showing a Submit button, which is the old behaviour.
 async function runAutoSubmissions() {
   if (!currentNetID || !currentCards) return;
-  const solutionUrls = currentSolves?.solutions ?? {};
   let submittedAny = false;
 
   for (const cards of currentCards) {
     const pending = pendingAutoSubmissions(
       cards.performanceItems,
       currentAssignmentProgress,
-      { solutionUrls },
     );
     for (const submission of pending) {
       try {
@@ -433,6 +435,7 @@ async function initWeeks(netID) {
   const [
     cards,
     topics,
+    signoffStaff,
     { solvedProblems },
     progress,
     assignmentProgress,
@@ -441,6 +444,7 @@ async function initWeeks(netID) {
   ] = await Promise.all([
     getVisibleWeeks(),
     getTopics(),
+    getSignoffStaff(),
     chrome.storage.local.get("solvedProblems"),
     getCachedProgress(),
     getCachedAssignmentProgress(),
@@ -457,6 +461,7 @@ async function initWeeks(netID) {
   currentSolves = solvedProblems ?? null;
   currentProgress = progress;
   currentAssignmentProgress = assignmentProgress;
+  currentSignoffStaff = signoffStaff;
   currentActiveOa = activeOa;
   currentKeystrokeSessions = keystrokeSessions;
   // Preload runtime-shape OAs for every topic so the sync third-card

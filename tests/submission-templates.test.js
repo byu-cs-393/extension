@@ -89,19 +89,26 @@ describe("fillOaTemplate", () => {
 });
 
 describe("fillPerformanceTemplate", () => {
-  it("emits all five labeled fields with a linked URL", () => {
+  it("emits the four labeled fields", () => {
     const body = fillPerformanceTemplate({
       date: "2026-09-15",
       workedWith: "Jack",
       howLong: "12 min",
       attemptNum: 1,
-      acceptedUrl: "https://leetcode.com/problems/lru-cache/",
     });
     expect(body).toContain("<strong>Date you did it:</strong> 2026-09-15");
     expect(body).toContain("<strong>Who you worked with (TA / instructor):</strong> Jack");
     expect(body).toContain("<strong>How long it took:</strong> 12 min");
     expect(body).toContain("<strong>Attempt you passed on:</strong> 1");
-    expect(body).toContain('<a href="https://leetcode.com/problems/lru-cache/">');
+  });
+
+  it("asks for no solution link", () => {
+    // A TA watches the exam happen and the editor session is recorded, so
+    // a pasted URL adds nothing — and it was the one field the TA
+    // couldn't supply, which kept a manual step in the flow.
+    const body = fillPerformanceTemplate({ date: "2026-09-15" });
+    expect(body).not.toMatch(/passing solution/i);
+    expect(body).not.toContain("<a href");
   });
 
   it("leaves values blank when fields are missing (partial fill)", () => {

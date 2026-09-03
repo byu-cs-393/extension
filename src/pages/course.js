@@ -15,6 +15,7 @@ import {
   getOaRuntimeShape,
   getAssignments,
   getTopics,
+  getSignoffStaff,
 } from "../data/course-data.js";
 import {
   createThirdCardSection,
@@ -37,6 +38,8 @@ let currentActiveOa = null;
 let currentNetID = null;
 let currentOaShapes = {};
 let currentAssignmentProgress = {};
+// Who a student can request a signoff from, from course.json.
+let currentSignoffStaff = [];
 // The full assignments[] list from course.json — extra credit lives
 // there and nowhere in schedule[], so it can't be reached via the week
 // cards like every other card type.
@@ -151,6 +154,7 @@ function createWeekSection(cards, status) {
         solutionUrls: currentSolves?.solutions ?? {},
         oaShapes: currentOaShapes,
         assignmentProgress: currentAssignmentProgress,
+        signoffStaff: currentSignoffStaff,
       },
     );
     if (cardEl) section.appendChild(cardEl);
@@ -304,10 +308,19 @@ function createProblemItem(p, isSolved) {
 
 async function init(netID) {
   currentNetID = netID;
-  const [cards, topics, { solvedProblems }, progress, assignmentProgress, activeOa, assignments] =
-    await Promise.all([
+  const [
+    cards,
+    topics,
+    signoffStaff,
+    { solvedProblems },
+    progress,
+    assignmentProgress,
+    activeOa,
+    assignments,
+  ] = await Promise.all([
       getAllScheduleCards(),
       getTopics(),
+      getSignoffStaff(),
       chrome.storage.local.get("solvedProblems"),
       getCachedProgress(),
       getCachedAssignmentProgress(),
@@ -319,6 +332,7 @@ async function init(netID) {
   currentSolves = solvedProblems ?? null;
   currentProgress = progress;
   currentAssignmentProgress = assignmentProgress;
+  currentSignoffStaff = signoffStaff;
   currentActiveOa = activeOa;
   const oaEntries = await Promise.all(
     topics.map(async (t) => [t.id, await getOaRuntimeShape(t.id)]),

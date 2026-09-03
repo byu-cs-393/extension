@@ -133,23 +133,48 @@ function signoffRowTitle(item) {
   return `${item.studentName} · Week ${item.weekNum} · ${topic}`;
 }
 
+// A request addressed to someone else belongs on their queue, not this
+// one. Requests with no addressee — made before the picker existed, or
+// on a course.json with no staff list — stay visible to everyone, so
+// nothing can get stranded by the change.
+function isMine(item, myNetID) {
+  if (!item?.requestedTaNetID) return true;
+  return item.requestedTaNetID === myNetID;
+}
+
 async function renderSignoffQueue() {
   const container = document.getElementById("signoff-list");
   container.innerHTML = "<p class=\"ta-empty\">Loading…</p>";
 
-  const items = await fetchSignoffQueueWithNames();
+  const all = await fetchSignoffQueueWithNames();
+  const myNetID = await getCurrentTaNetID();
+  const items = all.filter((item) => isMine(item, myNetID));
   container.innerHTML = "";
 
   if (items.length === 0) {
     const empty = document.createElement("p");
     empty.className = "ta-empty";
-    empty.textContent = "No pending signoff requests.";
+    empty.textContent =
+      all.length > 0
+        ? `No requests for you. ${all.length} pending with other staff.`
+        : "No pending signoff requests.";
     container.appendChild(empty);
     return;
   }
 
   for (const item of items) {
     container.appendChild(renderSignoffRow(item, applyDecision));
+  }
+
+  // Say what's being hidden. A TA who knows a student requested a signoff
+  // and can't see it should be able to tell the difference between "it
+  // went to someone else" and "something is broken".
+  const hidden = all.length - items.length;
+  if (hidden > 0) {
+    const note = document.createElement("p");
+    note.className = "ta-empty";
+    note.textContent = `${hidden} more pending with other staff.`;
+    container.appendChild(note);
   }
 }
 
@@ -204,6 +229,7 @@ async function fetchSignoffQueueWithNames() {
           progress: p,
           cards: cardsByWeek[p.weekNum] ?? null,
           requestedAt: p.requestedAt ?? null,
+          requestedTaNetID: p.requestedTaNetID ?? null,
         });
       }
       return items;

@@ -76,10 +76,10 @@ describe("when it does nothing", () => {
 
 describe("performance exams", () => {
   it("fills every field from what the TA recorded", () => {
-    const progress = passed({ signoffHowLong: "12 min" });
-    const out = autoSubmission(perfItem(), progress, {
-      solutionUrls: { "lru-cache": "https://leetcode.com/problems/lru-cache/submissions/999/" },
-    });
+    // No solution link: the TA watched it happen, and the editor session
+    // is recorded. That was the one field the TA couldn't supply, and
+    // dropping it is what removes the last manual step.
+    const out = autoSubmission(perfItem(), passed({ signoffHowLong: "12 min" }));
 
     expect(out.assignmentId).toBe("perf-data-structures");
     expect(out.data).toEqual({
@@ -87,7 +87,6 @@ describe("performance exams", () => {
       workedWith: "jack684",
       howLong: "12 min",
       attemptNum: 1,
-      acceptedUrl: "https://leetcode.com/problems/lru-cache/submissions/999/",
     });
   });
 
@@ -98,24 +97,7 @@ describe("performance exams", () => {
     expect(out.data.date).toBe("2026-09-15");
   });
 
-  it("looks the solution up by the exam's own problem", () => {
-    // course.json names one problem per exam, so the accepted submission
-    // can be found instead of typed.
-    const out = autoSubmission(perfItem(), passed(), {
-      solutionUrls: {
-        "two-sum": "https://leetcode.com/problems/two-sum/submissions/1/",
-        "lru-cache": "https://leetcode.com/problems/lru-cache/submissions/2/",
-      },
-    });
-    expect(out.data.acceptedUrl).toBe("https://leetcode.com/problems/lru-cache/submissions/2/");
-  });
 
-  it("leaves the URL blank rather than substituting the problem page", () => {
-    // The rubric is explicit that a problem link isn't proof of a solve.
-    const out = autoSubmission(perfItem(), passed(), { solutionUrls: {} });
-    expect(out.data.acceptedUrl).toBe("");
-    expect(out.data.acceptedUrl).not.toContain("leetcode.com/problems/lru-cache/");
-  });
 
   it("reports a retake as attempt 2", () => {
     const out = autoSubmission(perfItem(), passed({ failedAt: SIGNOFF_AT - 86_400_000 }));

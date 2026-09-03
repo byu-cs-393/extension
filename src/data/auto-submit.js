@@ -31,10 +31,7 @@ export function isAutoSubmitType(type) {
 // Everything needed to send one submission, or null if this item isn't
 // ready. Null is the normal case — most cards, most of the time.
 //
-// `solutionUrls` is { slug -> accepted submission URL } from the tracker.
-// Each performance exam names one problem in course.json, so the passing
-// solution can be looked up rather than typed.
-export function autoSubmission(item, progress, { solutionUrls = {} } = {}) {
+export function autoSubmission(item, progress) {
   if (!item || !isAutoSubmitType(item.type)) return null;
   if (!item.assignmentId) return null;
   if (progress?.status !== "passed") return null;
@@ -48,7 +45,10 @@ export function autoSubmission(item, progress, { solutionUrls = {} } = {}) {
     .slice(0, 10);
 
   if (item.type === "performance") {
-    const slug = leetcodeSlug(item.assignment?.question?.url);
+    // No solution link. A TA watches this one happen, so their word plus
+    // the recorded editor session is better evidence than a URL pasted in
+    // afterwards — and it was the one field the TA couldn't supply, which
+    // is what kept a manual step in the flow.
     return {
       assignmentId: item.assignmentId,
       type: item.type,
@@ -57,7 +57,6 @@ export function autoSubmission(item, progress, { solutionUrls = {} } = {}) {
         workedWith: progress.signoffTaNetID ?? "",
         howLong: progress.signoffHowLong ?? "",
         attemptNum: attemptNumberFrom(progress),
-        acceptedUrl: (slug ? solutionUrls[slug] : null) ?? "",
       },
     };
   }
@@ -87,18 +86,9 @@ function attemptNumberFrom(progress) {
   return progress?.failedAt || progress?.signoffFailedCount ? 2 : 1;
 }
 
-function leetcodeSlug(url) {
-  const match = String(url ?? "").match(
-    /^https:\/\/leetcode\.com\/problems\/([^/?#]+)/,
-  );
-  return match ? match[1] : null;
-}
-
 // Everything on a week that should submit itself, in one call.
-export function pendingAutoSubmissions(items, assignmentProgress, options) {
+export function pendingAutoSubmissions(items, assignmentProgress) {
   return (items ?? [])
-    .map((item) =>
-      autoSubmission(item, assignmentProgress?.[item?.assignmentId], options),
-    )
+    .map((item) => autoSubmission(item, assignmentProgress?.[item?.assignmentId]))
     .filter(Boolean);
 }

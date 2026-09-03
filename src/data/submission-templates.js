@@ -78,19 +78,20 @@ export function fillOaTemplate({ attemptNum, acceptedUrls }) {
 // "book a time with a TA" banner at the top — omitted here since the
 // filled submission is posted AFTER the exam, not before.
 // Ref: `_template_md`, `typ == "performance"`.
+// No solution link: a TA watches this one happen, and their word plus
+// the recorded editor session is better evidence than a URL the student
+// pastes in afterwards.
 export function fillPerformanceTemplate({
   date,
   workedWith,
   howLong,
   attemptNum,
-  acceptedUrl,
 }) {
   return (
     pLabelValue("Date you did it", date) +
     pLabelValue("Who you worked with (TA / instructor)", workedWith) +
     pLabelValue("How long it took", howLong) +
-    pLabelValue("Attempt you passed on", attemptNum) +
-    pLabelUrl("Link to your passing solution", acceptedUrl)
+    pLabelValue("Attempt you passed on", attemptNum)
   );
 }
 

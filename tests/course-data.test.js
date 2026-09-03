@@ -406,3 +406,42 @@ function sevenProblems() {
     url: `https://leetcode.com/problems/p-${i}/`,
   }));
 }
+
+describe("getSignoffStaff", () => {
+  // Who a student can address a signoff request to. Lives in the
+  // professor's course.json rather than being derived from Canvas
+  // enrolments — that would need a Cloud Function and a deploy, and the
+  // roster changes once a semester.
+  const withStaff = (staff) => {
+    globalThis.chrome = { runtime: { getURL: (p) => p } };
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ staff }) });
+  };
+
+  it("returns TAs and the instructor", async () => {
+    withStaff([
+      { netID: "mtr26", name: "Michael Reynolds", role: "instructor" },
+      { netID: "jack684", name: "Jack Leonard", role: "ta" },
+    ]);
+    const { getSignoffStaff } = await import(`../src/data/course-data.js?staff=1`);
+    const staff = await getSignoffStaff();
+    expect(staff.map((s) => s.netID)).toEqual(["mtr26", "jack684"]);
+  });
+
+  it("drops anyone who can't take a signoff", async () => {
+    withStaff([
+      { netID: "jack684", name: "Jack", role: "ta" },
+      { netID: "grader1", name: "Grader", role: "grader" },
+      { name: "No netID", role: "ta" },
+    ]);
+    const { getSignoffStaff } = await import(`../src/data/course-data.js?staff=2`);
+    expect((await getSignoffStaff()).map((s) => s.netID)).toEqual(["jack684"]);
+  });
+
+  it("returns [] when course.json has no staff list", async () => {
+    // Degrades to "any TA" — requests then show to everyone, which is the
+    // behaviour before signoffs were addressable.
+    withStaff(undefined);
+    const { getSignoffStaff } = await import(`../src/data/course-data.js?staff=3`);
+    expect(await getSignoffStaff()).toEqual([]);
+  });
+});

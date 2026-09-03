@@ -193,7 +193,7 @@ function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
     return article;
   }
   if (status === "requested") {
-    addStatusLine(article, "⏳ Signoff requested");
+    addStatusLine(article, requestedLine(ap, ctx));
     return article;
   }
   if (weekStatus === "past" && status === "available") {
@@ -206,27 +206,74 @@ function renderCoursePerformanceExam(item, _progress, weekStatus, ctx) {
   return article;
 }
 
+// "⏳ Signoff requested" is thin once a request is addressed — a student
+// wants to see WHO is expecting them.
+function requestedLine(progress, ctx) {
+  const netID = progress?.requestedTaNetID;
+  if (!netID) return "⏳ Signoff requested";
+  const person = (ctx?.signoffStaff ?? []).find((p) => p.netID === netID);
+  return `⏳ Signoff requested from ${person?.name ?? netID}`;
+}
+
 // Shared helper: renders the "Request signoff" button. Wired to
 // assignment-progress.js's requestSignoff. Records weekNum so the TA's
 // signoff queue can surface it under the right week header.
 function appendRequestButton(article, item, existingProgress, ctx, label) {
-  addPrimaryButton(article, label, async () => {
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+
+  // Who the student arranged this with. The request then lands only on
+  // that person's queue instead of everyone's.
+  //
+  // Rendered only when the roster has more than one name — with a single
+  // TA the choice is noise, and with none (a course.json that predates
+  // `staff`) the request goes to everyone, which is the old behaviour.
+  const staff = ctx?.signoffStaff ?? [];
+  let select = null;
+  if (staff.length > 1) {
+    select = document.createElement("select");
+    select.className = "signoff-ta-select";
+    select.setAttribute("aria-label", "Who are you meeting with?");
+    for (const person of staff) {
+      const option = document.createElement("option");
+      option.value = person.netID;
+      option.textContent =
+        person.role === "instructor" ? `${person.name} (instructor)` : person.name;
+      select.appendChild(option);
+    }
+    // Pre-select whoever they asked last time, if that person is still on
+    // the roster — a student who books with the same TA every week
+    // shouldn't re-choose every time.
+    const previous = existingProgress?.requestedTaNetID;
+    if (previous && staff.some((p) => p.netID === previous)) select.value = previous;
+    actions.appendChild(select);
+  }
+
+  const btn = document.createElement("button");
+  btn.className = "btn-primary";
+  btn.textContent = label;
+  btn.addEventListener("click", async () => {
     if (!ctx?.netID || !item?.assignmentId) {
       stubAction("Signoff");
       return;
     }
+    btn.disabled = true;
     try {
       await requestSignoff({
         netID: ctx.netID,
         assignmentId: item.assignmentId,
         type: item.type,
         weekNum: ctx.weekNum,
+        requestedTaNetID: select?.value ?? staff[0]?.netID ?? null,
       });
     } catch (err) {
       console.error("[CS 393 Buddy] Failed to request signoff:", err);
       alert("Couldn't submit your signoff request. Try again in a moment.");
+      btn.disabled = false;
     }
   });
+  actions.appendChild(btn);
+  article.appendChild(actions);
 }
 
 function renderCoursePeerMock(item, _progress, _weekStatus, ctx) {
@@ -280,7 +327,7 @@ function renderCourseLiveInterview(item, _progress, weekStatus, ctx) {
     return article;
   }
   if (status === "requested") {
-    addStatusLine(article, "⏳ Signoff requested");
+    addStatusLine(article, requestedLine(ap, ctx));
     return article;
   }
   if (weekStatus === "past" && status === "available") {

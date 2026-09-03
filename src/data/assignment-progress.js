@@ -76,7 +76,16 @@ async function patchLocalCache(assignmentId, doc) {
 // Student requests signoff on a performance or live-interview
 // assignment. Preserves prior fields (retry chain history) via a
 // pre-read of the existing doc.
-export async function requestSignoff({ netID, assignmentId, type, weekNum }) {
+export async function requestSignoff({
+  netID,
+  assignmentId,
+  type,
+  weekNum,
+  // Who the student arranged this with. The request then only appears on
+  // that person's queue — with several TAs, an unaddressed queue means
+  // everyone sees everything and nobody knows whose it is.
+  requestedTaNetID,
+}) {
   const now = Date.now();
   const existing = (await fetchDoc(`students/${netID}/assignmentProgress/${assignmentId}`)) ?? {};
   const newDoc = {
@@ -86,6 +95,7 @@ export async function requestSignoff({ netID, assignmentId, type, weekNum }) {
     ...(Number.isFinite(weekNum) ? { weekNum } : {}),
     status: "requested",
     requestedAt: now,
+    ...(requestedTaNetID ? { requestedTaNetID } : {}),
     // Clear any previous signoff decision fields — this is a fresh
     // request. Leave graderRating / selfRating alone if the caller
     // wants to re-request after a failed pass; they can wipe manually.

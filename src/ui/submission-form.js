@@ -48,7 +48,6 @@ const SCHEMAS_BY_TYPE = {
       { name: "workedWith", label: "Who you worked with (TA / instructor)", type: "text", required: true, placeholder: "e.g. Jack" },
       { name: "howLong", label: "How long it took", type: "text", required: true, placeholder: "e.g. 12 min" },
       { name: "attemptNum", label: "Attempt you passed on", type: "number", required: true, min: 1 },
-      { name: "acceptedUrl", label: "Link to your passing solution", type: "url", required: true, placeholder: "https://leetcode.com/problems/..." },
     ],
   },
   "live-interview": {

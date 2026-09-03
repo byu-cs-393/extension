@@ -55,6 +55,18 @@
   "booking": {
     "instructor": "https://tinyurl.com/mtr26"
   },
+  "staff": [
+    {
+      "netID": "mtr26",
+      "name": "Michael Reynolds",
+      "role": "instructor"
+    },
+    {
+      "netID": "jack684",
+      "name": "Jack Leonard",
+      "role": "ta"
+    }
+  ],
   "canvas": {
     "courseId": 35464,
     "host": "byu.instructure.com",

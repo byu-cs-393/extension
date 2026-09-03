@@ -55,6 +55,27 @@ export async function getCanvasConfig() {
   return c.canvas;
 }
 
+// ---- Staff --------------------------------------------------------------
+//
+// Who a student can request a signoff from. Lives in the professor's
+// course.json rather than being derived from Canvas enrolments: a Canvas
+// lookup would need a Cloud Function and a deploy, and the roster changes
+// once a semester. Empty or missing degrades to "any TA", which shows the
+// request to everyone — the behaviour before signoffs were addressable.
+
+export async function getStaff() {
+  const c = await loadCourse();
+  return Array.isArray(c.staff) ? c.staff : [];
+}
+
+// Just the people who take signoffs. The instructor is included — he
+// does the Instructor Pass/Fail Interview — but anyone marked otherwise
+// is filtered out so the dropdown doesn't offer someone who can't help.
+export async function getSignoffStaff() {
+  const staff = await getStaff();
+  return staff.filter((s) => s?.netID && (s.role === "ta" || s.role === "instructor"));
+}
+
 // ---- Topics ------------------------------------------------------------
 
 export async function getTopics() {
