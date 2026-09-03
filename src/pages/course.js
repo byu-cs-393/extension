@@ -81,6 +81,8 @@ function renderWeeks() {
 function createWeekSection(cards, status) {
   const section = document.createElement("section");
   section.className = "week";
+  // No longer used for styling — the fade moved onto the locked cards
+  // themselves. Kept as a hook for anything that needs to know.
   if (status === "future") section.classList.add("future");
   section.dataset.weekNum = String(cards.week);
 

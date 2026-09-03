@@ -207,11 +207,16 @@ body {
   vertical-align: 2px;
 }
 
-/* Future weeks: faded, read-only preview. Only the course.html view
-   uses this state; the dashboard filters out future weeks entirely. */
-.week.future {
-  opacity: 0.55;
-}
+/* Future weeks used to fade the whole section. That was right when the
+   entire week was a read-only preview; it isn't now. Performance exams,
+   live interviews and peer mocks are all usable ahead of time, and
+   fading a working button is a clear message that it doesn't work — a
+   student would read it as disabled and never click.
+
+   So the section renders at full strength and only the genuinely
+   preview-only cards are muted: the problem list and the locked OA,
+   both .future-placeholder. Only course.html has future weeks; the
+   dashboard filters them out entirely. */
 
 .week-badge.locked {
   background: var(--bg, #f9fafb);
@@ -225,6 +230,9 @@ body {
 .card.future-placeholder {
   border-style: dashed;
   background: transparent;
+  /* The muting lives here rather than on the week, so it applies to what
+     is actually locked and nothing else. */
+  opacity: 0.6;
 }
 
 .week-dates {
