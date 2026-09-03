@@ -40,10 +40,14 @@ export function autoSubmission(progress) {
   if (!progress || !isAutoSubmitType(progress.type)) return null;
   if (!progress.assignmentId) return null;
   if (progress?.status !== "passed") return null;
-  // Already sent. Resubmission stays possible from the card, but it isn't
-  // automatic — re-sending on every dashboard load would spam Canvas with
-  // a fresh attempt each time.
-  if (progress?.canvasSubmittedAt) return null;
+  // Already sent for THIS signoff. Comparing timestamps rather than just
+  // testing for a submission is what makes retakes work: a student who
+  // fails, re-requests and passes again has a signoffAt newer than their
+  // last submission, so the new result goes to Canvas. Testing presence
+  // alone meant the first submission silently blocked every later one.
+  //
+  // Canvas grades the newest attempt, so the resubmission supersedes.
+  if (alreadySubmittedForThisSignoff(progress)) return null;
 
   const date = new Date(progress.signoffAt ?? Date.now())
     .toISOString()
@@ -83,6 +87,16 @@ export function autoSubmission(progress) {
         : "",
     },
   };
+}
+
+function alreadySubmittedForThisSignoff(progress) {
+  const submittedAt = progress?.canvasSubmittedAt;
+  if (!Number.isFinite(submittedAt)) return false;
+  const signoffAt = progress?.signoffAt;
+  // No signoff timestamp to compare against — treat a submission as
+  // covering it, rather than resubmitting on every dashboard load.
+  if (!Number.isFinite(signoffAt)) return true;
+  return submittedAt >= signoffAt;
 }
 
 // A student who failed and retook passed on a later attempt. Nothing

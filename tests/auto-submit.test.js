@@ -61,7 +61,11 @@ describe("when it does nothing", () => {
 
   it("skips one that has already been submitted", () => {
     // Otherwise every dashboard load would file a fresh Canvas attempt.
-    expect(autoSubmission(perfDoc({ canvasSubmittedAt: Date.now() }))).toBe(null);
+    // The submission has to be AFTER the signoff it covers — an earlier
+    // one means the student has since passed again.
+    expect(
+      autoSubmission(perfDoc({ canvasSubmittedAt: SIGNOFF_AT + 60_000 })),
+    ).toBe(null);
   });
 
   it("skips types that aren't TA-gated", () => {
@@ -189,5 +193,73 @@ describe("the student's only action is requesting", () => {
     const progress = perfDoc({ signoffHowLong: "12 min" });
     expect(autoSubmission(progress)).not.toBe(null);
     expect(autoSubmission(progress)).not.toBe(null);
+  });
+});
+
+describe("retakes", () => {
+  // A student fails, re-requests, and passes again. The second result has
+  // to reach Canvas — testing only for the PRESENCE of a submission meant
+  // the first one silently blocked every later attempt.
+  const submittedAt = SIGNOFF_AT + 60_000;
+
+  it("skips a pass that has already been submitted", () => {
+    expect(autoSubmission(perfDoc({ canvasSubmittedAt: submittedAt }))).toBe(null);
+  });
+
+  it("resubmits when the student passed again afterwards", () => {
+    const retake = perfDoc({
+      canvasSubmittedAt: submittedAt,
+      signoffAt: submittedAt + 86_400_000, // passed again the next day
+      signoffHowLong: "9 min",
+    });
+    const out = autoSubmission(retake);
+    expect(out).not.toBe(null);
+    expect(out.data.howLong).toBe("9 min");
+  });
+
+  it("uses the new signoff's date, not the old submission's", () => {
+    const laterSignoff = Date.parse("2026-09-22T17:00:00Z");
+    const out = autoSubmission(
+      perfDoc({ canvasSubmittedAt: submittedAt, signoffAt: laterSignoff }),
+    );
+    expect(out.data.date).toBe("2026-09-22");
+  });
+
+  it("does not resubmit once the retake has been sent too", () => {
+    const later = SIGNOFF_AT + 86_400_000;
+    expect(
+      autoSubmission(perfDoc({ signoffAt: later, canvasSubmittedAt: later + 1000 })),
+    ).toBe(null);
+  });
+
+  it("treats an exactly-simultaneous submission as covering the signoff", () => {
+    expect(
+      autoSubmission(perfDoc({ signoffAt: SIGNOFF_AT, canvasSubmittedAt: SIGNOFF_AT })),
+    ).toBe(null);
+  });
+
+  it("doesn't resubmit forever when a signoff has no timestamp", () => {
+    // Older docs predate signoffAt. Resubmitting on every dashboard load
+    // would file a fresh Canvas attempt each time.
+    expect(
+      autoSubmission({
+        type: "performance",
+        assignmentId: "perf-graphs",
+        status: "passed",
+        canvasSubmittedAt: submittedAt,
+      }),
+    ).toBe(null);
+  });
+
+  it("still submits a retake for a live interview", () => {
+    const out = autoSubmission(
+      liveDoc({
+        canvasSubmittedAt: submittedAt,
+        signoffAt: submittedAt + 3600_000,
+        graderRating: 3,
+      }),
+    );
+    expect(out).not.toBe(null);
+    expect(out.data.graderRating).toBe("3");
   });
 });
