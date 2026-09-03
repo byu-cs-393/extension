@@ -358,3 +358,51 @@ describe("translateOaToRuntimeShape", () => {
     expect(rt.attempts).toEqual([]);
   });
 });
+
+describe("translateOaToRuntimeShape — attempt rules", () => {
+  // These were hardcoded to null/null/false, so every attempt silently
+  // required ALL of its problems. A student following "Solve 3 of these
+  // questions" on a 7-problem attempt could never pass it.
+  const oa = (attempts) => ({ topic: "data-structures", attempts });
+
+  it("carries requiredSolves through from course.json", () => {
+    const rt = translateOaToRuntimeShape(
+      oa([{ n: 2, requiredSolves: 3, problems: sevenProblems() }]),
+    );
+    expect(rt.attempts[0].requiredSolves).toBe(3);
+  });
+
+  it("carries the time limit and help flag through", () => {
+    const rt = translateOaToRuntimeShape(
+      oa([{ n: 1, timeLimitMin: 90, helpAllowed: false, problems: [] },
+          { n: 3, timeLimitMin: null, helpAllowed: true, problems: [] }]),
+    );
+    expect(rt.attempts[0].timeLimitMin).toBe(90);
+    expect(rt.attempts[0].helpAllowed).toBe(false);
+    expect(rt.attempts[1].timeLimitMin).toBe(null);
+    expect(rt.attempts[1].helpAllowed).toBe(true);
+  });
+
+  it("treats a missing requiredSolves as 'all of them'", () => {
+    // null is the documented way to say "solve everything", and
+    // attemptPassed already falls back to problems.length.
+    const rt = translateOaToRuntimeShape(oa([{ n: 1, problems: sevenProblems() }]));
+    expect(rt.attempts[0].requiredSolves).toBe(null);
+  });
+
+  it("ignores non-numeric rules rather than trusting them", () => {
+    const rt = translateOaToRuntimeShape(
+      oa([{ n: 1, requiredSolves: "three", timeLimitMin: "90", helpAllowed: "yes", problems: [] }]),
+    );
+    expect(rt.attempts[0].requiredSolves).toBe(null);
+    expect(rt.attempts[0].timeLimitMin).toBe(null);
+    expect(rt.attempts[0].helpAllowed).toBe(false);
+  });
+});
+
+function sevenProblems() {
+  return Array.from({ length: 7 }, (_, i) => ({
+    name: `P${i}`,
+    url: `https://leetcode.com/problems/p-${i}/`,
+  }));
+}

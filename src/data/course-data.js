@@ -360,9 +360,17 @@ export function translateOaToRuntimeShape(oa) {
     type: "onlineAssessment",
     topic: oa.topic,
     attempts: (oa.attempts ?? []).map((a) => ({
-      timeLimitMin: null,
-      requiredSolves: null,
-      helpAllowed: false,
+      // These used to be hardcoded null/null/false, which meant every
+      // attempt silently required ALL of its problems — so a student
+      // following "Solve 3 of these questions" on a 7-problem attempt
+      // could never pass it. The rules live in the professor's
+      // course.json now; `desc` remains the human-readable version.
+      //
+      // requiredSolves null means "all of them", which is what
+      // attemptPassed already falls back to.
+      timeLimitMin: Number.isFinite(a.timeLimitMin) ? a.timeLimitMin : null,
+      requiredSolves: Number.isFinite(a.requiredSolves) ? a.requiredSolves : null,
+      helpAllowed: a.helpAllowed === true,
       desc: a.desc,
       problems: (a.problems ?? [])
         .map((p) => ({
