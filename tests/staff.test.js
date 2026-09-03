@@ -130,3 +130,23 @@ describe("registerAsStaff", () => {
     expect(patchDoc).not.toHaveBeenCalled();
   });
 });
+
+describe("a roster of one", () => {
+  it("returns the single TA", async () => {
+    // The dropdown doesn't render below two names — the card falls back
+    // to sending the request to whoever is on the list.
+    fetchCollection.mockResolvedValue([]);
+    bundled.mockResolvedValue([ta("jack684", "Jack Leonard")]);
+    const staff = await getSignoffStaff({ force: true });
+    expect(staff).toEqual([{ netID: "jack684", name: "Jack Leonard", role: "ta" }]);
+  });
+
+  it("grows without a release when a second TA registers", async () => {
+    // The whole reason this reads Firestore: someone joining mid-semester
+    // appears from their own dashboard login.
+    bundled.mockResolvedValue([ta("jack684", "Jack Leonard")]);
+    fetchCollection.mockResolvedValue([ta("newta", "New TA")]);
+    const staff = await getSignoffStaff({ force: true });
+    expect(staff.map((s) => s.netID).sort()).toEqual(["jack684", "newta"]);
+  });
+});

@@ -57,11 +57,6 @@
   },
   "staff": [
     {
-      "netID": "mtr26",
-      "name": "Michael Reynolds",
-      "role": "instructor"
-    },
-    {
       "netID": "jack684",
       "name": "Jack Leonard",
       "role": "ta"

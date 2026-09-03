@@ -362,8 +362,24 @@ function createProblemItem(p, isSolved) {
 // Failures are deliberately quiet. The student didn't ask for this and
 // can't act on a Canvas error they didn't cause; the card falls back to
 // showing a Submit button, which is the old behaviour.
+// Guards re-entry: sendCanvasSubmission writes the progress cache, which
+// fires the storage listener, which calls this again. The second pass
+// would find canvasSubmittedAt set and do nothing, but there's no reason
+// to have two in flight over the same assignment.
+let autoSubmitInFlight = false;
+
 async function runAutoSubmissions() {
   if (!currentNetID || !currentCards) return;
+  if (autoSubmitInFlight) return;
+  autoSubmitInFlight = true;
+  try {
+    await submitPendingApprovals();
+  } finally {
+    autoSubmitInFlight = false;
+  }
+}
+
+async function submitPendingApprovals() {
   let submittedAny = false;
 
   for (const cards of currentCards) {
@@ -583,6 +599,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentAssignmentProgress =
       changes[ASSIGNMENT_PROGRESS_CACHE_KEY].newValue?.progress ?? {};
     needsRender = true;
+    // A TA's Pass is written to Firestore from THEIR browser, so it
+    // reaches this page only when refreshAssignmentProgress lands here.
+    // The bootstrap call to runAutoSubmissions ran before that against a
+    // cache that still said "requested" and correctly found nothing to
+    // do — without this the submission waited for the NEXT dashboard
+    // open, which looks exactly like auto-submit not working.
+    runAutoSubmissions();
   }
   if (changes[OA_SESSION_KEY]) {
     currentActiveOa = changes[OA_SESSION_KEY].newValue ?? null;
