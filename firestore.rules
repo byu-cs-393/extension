@@ -35,6 +35,27 @@ service cloud.firestore {
     // Write: student themselves only. TAs don't currently need to
     // mutate student docs directly — signoff writes live one level
     // deeper on weekProgress.
+    // ---- staff/{netID} -------------------------------------------------
+    // Who a student can request a signoff from.
+    //
+    // A TA self-registers here the first time they open the TA dashboard.
+    // The alternative was a `staff` list bundled in course.json, which
+    // meant a new TA joining mid-semester required a new extension
+    // release and every student re-downloading it. This way they log in
+    // once and appear in everyone's dropdown.
+    //
+    // Write is restricted to the TA's OWN doc AND requires the `role: ta`
+    // claim, which verifyStudent mints only after checking the person's
+    // Canvas enrolment. So a student can't add themselves.
+    match /staff/{netID} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                     && request.auth.uid == netID
+                     && request.auth.token.role == 'ta'
+                     && isValidNetID(netID);
+      allow delete: if false;
+    }
+
     match /students/{netID} {
       allow read: if request.auth != null
                     && (request.auth.uid == netID

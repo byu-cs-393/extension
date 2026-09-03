@@ -15,8 +15,8 @@ import {
   getOaRuntimeShape,
   getAssignments,
   getTopics,
-  getSignoffStaff,
 } from "../data/course-data.js";
+import { getSignoffStaff } from "../data/staff.js";
 import {
   createThirdCardSection,
   getCachedProgress,

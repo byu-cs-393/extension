@@ -13,8 +13,8 @@ import {
   getTopics,
   studyProblemsForWeek,
   studyAssignmentIdForWeek,
-  getSignoffStaff,
 } from "../data/course-data.js";
+import { getSignoffStaff } from "../data/staff.js";
 import {
   createThirdCardSection,
   getCachedProgress,

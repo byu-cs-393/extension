@@ -16,6 +16,7 @@ import {
   flattenPlacementsToProblems,
 } from "../data/course-data.js";
 import { recordSignoffDecision } from "../data/assignment-progress.js";
+import { registerAsStaff } from "../data/staff.js";
 import {
   fetchKeystrokeSessions,
   renderKeystrokeSection,
@@ -42,7 +43,20 @@ async function requireTaOrRedirect() {
     window.location.href = chrome.runtime.getURL("dashboard.html");
     return false;
   }
+  // Put this TA on the list students choose from. Self-service on
+  // purpose: a TA who joins mid-semester appears by opening this page,
+  // rather than needing a course.json edit and a new extension release.
+  // Best-effort — nothing here should stop the dashboard rendering.
+  registerAsStaff(await currentStaffIdentity()).catch((err) =>
+    console.warn("[CS 393 Buddy] couldn't register as staff:", err),
+  );
   return true;
+}
+
+async function currentStaffIdentity() {
+  const netID = await getCurrentTaNetID();
+  const student = netID ? await fetchDoc(`students/${netID}`).catch(() => null) : null;
+  return { netID, name: student?.name || netID };
 }
 
 // ---- Signoff queue -----------------------------------------------------
