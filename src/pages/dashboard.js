@@ -369,7 +369,7 @@ function createProblemItem(p, isSolved) {
 let autoSubmitInFlight = false;
 
 async function runAutoSubmissions() {
-  if (!currentNetID || !currentCards) return;
+  if (!currentNetID) return;
   if (autoSubmitInFlight) return;
   autoSubmitInFlight = true;
   try {
@@ -380,36 +380,36 @@ async function runAutoSubmissions() {
 }
 
 async function submitPendingApprovals() {
-  let submittedAny = false;
+  if (!currentNetID) return;
+  // Scans the whole progress map rather than the loaded weeks: the
+  // dashboard only loads past and current weeks, but a signoff can be
+  // requested for a future week's exam from the full-course page.
+  const pending = pendingAutoSubmissions(currentAssignmentProgress);
+  if (pending.length === 0) return;
 
-  for (const cards of currentCards) {
-    const pending = pendingAutoSubmissions(
-      cards.performanceItems,
-      currentAssignmentProgress,
-    );
-    for (const submission of pending) {
-      try {
-        const outcome = await sendCanvasSubmission({
-          type: submission.type,
-          assignmentId: submission.assignmentId,
-          weekNum: cards.week,
-          netID: currentNetID,
-          data: submission.data,
-        });
-        if (outcome.ok) {
-          submittedAny = true;
-          console.log(
-            `[CS 393 Buddy] auto-submitted ${submission.assignmentId} to Canvas`,
-          );
-        } else {
-          console.error(
-            `[CS 393 Buddy] auto-submit failed for ${submission.assignmentId}:`,
-            outcome.result,
-          );
-        }
-      } catch (err) {
-        console.error("[CS 393 Buddy] auto-submit threw:", err);
+  let submittedAny = false;
+  for (const submission of pending) {
+    try {
+      const outcome = await sendCanvasSubmission({
+        type: submission.type,
+        assignmentId: submission.assignmentId,
+        weekNum: submission.weekNum,
+        netID: currentNetID,
+        data: submission.data,
+      });
+      if (outcome.ok) {
+        submittedAny = true;
+        console.log(
+          `[CS 393 Buddy] auto-submitted ${submission.assignmentId} to Canvas`,
+        );
+      } else {
+        console.error(
+          `[CS 393 Buddy] auto-submit failed for ${submission.assignmentId}:`,
+          outcome.result,
+        );
       }
+    } catch (err) {
+      console.error("[CS 393 Buddy] auto-submit threw:", err);
     }
   }
 

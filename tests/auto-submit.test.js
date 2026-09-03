@@ -13,22 +13,23 @@ import {
 
 const SIGNOFF_AT = Date.parse("2026-09-15T18:30:00Z");
 
-const perfItem = (over = {}) => ({
+// One progress document is all autoSubmission needs — it no longer takes
+// a week's card, because the dashboard doesn't load every week and a
+// signoff can be requested for a future one.
+const perfDoc = (over = {}) => ({
   type: "performance",
   assignmentId: "perf-data-structures",
-  assignment: {
-    question: { name: "LRU Cache", url: "https://leetcode.com/problems/lru-cache/" },
-  },
+  weekNum: 3,
+  status: "passed",
+  signoffAt: SIGNOFF_AT,
+  signoffTaNetID: "jack684",
   ...over,
 });
 
-const liveItem = (over = {}) => ({
+const liveDoc = (over = {}) => ({
   type: "live-interview",
   assignmentId: "live-1",
-  ...over,
-});
-
-const passed = (over = {}) => ({
+  weekNum: 4,
   status: "passed",
   signoffAt: SIGNOFF_AT,
   signoffTaNetID: "jack684",
@@ -50,27 +51,26 @@ describe("isAutoSubmitType", () => {
 
 describe("when it does nothing", () => {
   it("skips an assignment with no signoff yet", () => {
-    expect(autoSubmission(perfItem(), null)).toBe(null);
-    expect(autoSubmission(perfItem(), { status: "requested" })).toBe(null);
+    expect(autoSubmission(null)).toBe(null);
+    expect(autoSubmission(perfDoc({ status: "requested" }))).toBe(null);
   });
 
   it("skips a failed signoff", () => {
-    expect(autoSubmission(perfItem(), { status: "failed" })).toBe(null);
+    expect(autoSubmission(perfDoc({ status: "failed" }))).toBe(null);
   });
 
   it("skips one that has already been submitted", () => {
     // Otherwise every dashboard load would file a fresh Canvas attempt.
-    const progress = passed({ canvasSubmittedAt: Date.now() });
-    expect(autoSubmission(perfItem(), progress)).toBe(null);
+    expect(autoSubmission(perfDoc({ canvasSubmittedAt: Date.now() }))).toBe(null);
   });
 
   it("skips types that aren't TA-gated", () => {
-    expect(autoSubmission({ ...perfItem(), type: "peer-mock" }, passed())).toBe(null);
+    expect(autoSubmission(perfDoc({ type: "peer-mock" }))).toBe(null);
   });
 
   it("skips junk input", () => {
-    expect(autoSubmission(null, passed())).toBe(null);
-    expect(autoSubmission({ type: "performance" }, passed())).toBe(null);
+    expect(autoSubmission(null)).toBe(null);
+    expect(autoSubmission({ type: "performance", status: "passed" })).toBe(null);
   });
 });
 
@@ -79,7 +79,7 @@ describe("performance exams", () => {
     // No solution link: the TA watched it happen, and the editor session
     // is recorded. That was the one field the TA couldn't supply, and
     // dropping it is what removes the last manual step.
-    const out = autoSubmission(perfItem(), passed({ signoffHowLong: "12 min" }));
+    const out = autoSubmission(perfDoc({ signoffHowLong: "12 min" }));
 
     expect(out.assignmentId).toBe("perf-data-structures");
     expect(out.data).toEqual({
@@ -93,66 +93,72 @@ describe("performance exams", () => {
   it("dates the submission from the signoff, not from now", () => {
     // A student who opens the dashboard three days later still gets the
     // date the exam actually happened.
-    const out = autoSubmission(perfItem(), passed());
+    const out = autoSubmission(perfDoc());
     expect(out.data.date).toBe("2026-09-15");
   });
 
 
 
   it("reports a retake as attempt 2", () => {
-    const out = autoSubmission(perfItem(), passed({ failedAt: SIGNOFF_AT - 86_400_000 }));
+    const out = autoSubmission(perfDoc({ failedAt: SIGNOFF_AT - 86_400_000 }));
     expect(out.data.attemptNum).toBe(2);
   });
 
   it("survives a TA who left the duration blank", () => {
-    const out = autoSubmission(perfItem(), passed());
+    const out = autoSubmission(perfDoc());
     expect(out.data.howLong).toBe("");
   });
 });
 
 describe("live interviews", () => {
   it("uses the TA's summary", () => {
-    const out = autoSubmission(liveItem(), passed({ signoffHowItWent: "Strong communication." }));
+    const out = autoSubmission(liveDoc({ signoffHowItWent: "Strong communication." }));
     expect(out.data.howItWent).toBe("Strong communication.");
     expect(out.data.date).toBe("2026-09-15");
   });
 
   it("carries the TA's rating, labelled as the TA's", () => {
-    const out = autoSubmission(liveItem(), passed({ graderRating: 3 }));
+    const out = autoSubmission(liveDoc({ graderRating: 3 }));
     expect(out.data.graderRating).toBe("3");
   });
 
   it("asks the student for nothing at all", () => {
     // No self-rating field: making a student grade themselves after a TA
     // had already signed them off was the last manual step in this flow.
-    const out = autoSubmission(liveItem(), passed({ graderRating: 3 }));
+    const out = autoSubmission(liveDoc({ graderRating: 3 }));
     expect(Object.keys(out.data).sort()).toEqual(["date", "graderRating", "howItWent"]);
   });
 
   it("survives a TA who skipped the rating", () => {
-    expect(autoSubmission(liveItem(), passed()).data.graderRating).toBe("");
+    expect(autoSubmission(liveDoc()).data.graderRating).toBe("");
   });
 });
 
 describe("pendingAutoSubmissions", () => {
-  it("returns only the items that are ready", () => {
-    const items = [
-      perfItem(),
-      liveItem(),
-      { type: "peer-mock", assignmentId: "peer-mock-w3" },
-    ];
-    const progress = {
-      "perf-data-structures": passed({ signoffHowLong: "10 min" }),
-      "live-1": { status: "requested" },
-      "peer-mock-w3": passed(),
-    };
-    const out = pendingAutoSubmissions(items, progress);
+  it("returns only the ones that are ready", () => {
+    const out = pendingAutoSubmissions({
+      "perf-data-structures": perfDoc({ signoffHowLong: "10 min" }),
+      "live-1": liveDoc({ status: "requested" }),
+      "peer-mock-w3": perfDoc({ type: "peer-mock", assignmentId: "peer-mock-w3" }),
+    });
     expect(out.map((s) => s.assignmentId)).toEqual(["perf-data-structures"]);
   });
 
-  it("returns nothing for an empty week", () => {
-    expect(pendingAutoSubmissions([], {})).toEqual([]);
-    expect(pendingAutoSubmissions(null, null)).toEqual([]);
+  it("finds one in a week the dashboard hasn't loaded", () => {
+    // The bug this signature change fixes: the dashboard only loads past
+    // and current weeks, but a student can request a signoff for a future
+    // week's exam from the full-course page. Scanning cards skipped
+    // exactly those, and the submission never went out.
+    const out = pendingAutoSubmissions({
+      "perf-data-structures": perfDoc({ weekNum: 13, signoffHowLong: "9 min" }),
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].weekNum).toBe(13);
+  });
+
+  it("returns nothing for an empty map", () => {
+    expect(pendingAutoSubmissions({})).toEqual([]);
+    expect(pendingAutoSubmissions(null)).toEqual([]);
   });
 });
 
@@ -161,27 +167,27 @@ describe("the student's only action is requesting", () => {
   // and the submission goes out on its own. Nothing here should ever
   // produce a field a student has to fill in.
   it("needs nothing from the student for either type", () => {
-    const perf = autoSubmission(perfItem(), passed({ signoffHowLong: "12 min" }));
-    const live = autoSubmission(liveItem(), passed({ signoffHowItWent: "Good", graderRating: 2 }));
+    const perfOut = autoSubmission(perfDoc({ signoffHowLong: "12 min" }));
+    const liveOut = autoSubmission(liveDoc({ signoffHowItWent: "Good", graderRating: 2 }));
 
-    for (const out of [perf, live]) {
+    for (const out of [perfOut, liveOut]) {
       for (const value of Object.values(out.data)) {
         expect(typeof value === "string" || typeof value === "number").toBe(true);
       }
     }
     // Every value traces to the signoff or the clock — none to a form.
-    expect(perf.data.workedWith).toBe("jack684");
-    expect(perf.data.howLong).toBe("12 min");
-    expect(live.data.howItWent).toBe("Good");
-    expect(live.data.graderRating).toBe("2");
+    expect(perfOut.data.workedWith).toBe("jack684");
+    expect(perfOut.data.howLong).toBe("12 min");
+    expect(liveOut.data.howItWent).toBe("Good");
+    expect(liveOut.data.graderRating).toBe("2");
   });
 
   it("retries on the next load rather than needing a button", () => {
     // Nothing marks a failed attempt, so an unsubmitted pass stays
     // pending and the next dashboard load tries again. That's why the
     // card can safely have no fallback button.
-    const progress = passed({ signoffHowLong: "12 min" });
-    expect(autoSubmission(perfItem(), progress)).not.toBe(null);
-    expect(autoSubmission(perfItem(), progress)).not.toBe(null);
+    const progress = perfDoc({ signoffHowLong: "12 min" });
+    expect(autoSubmission(progress)).not.toBe(null);
+    expect(autoSubmission(progress)).not.toBe(null);
   });
 });

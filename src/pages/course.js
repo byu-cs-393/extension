@@ -17,6 +17,8 @@ import {
   getTopics,
 } from "../data/course-data.js";
 import { getSignoffStaff } from "../data/staff.js";
+import { pendingAutoSubmissions } from "../data/auto-submit.js";
+import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
   createThirdCardSection,
   getCachedProgress,
@@ -339,6 +341,7 @@ async function init(netID) {
   );
   currentOaShapes = Object.fromEntries(oaEntries);
   renderWeeks();
+  runAutoSubmissions();
 
   refreshProgress(netID);
   refreshAssignmentProgress(netID);
@@ -353,6 +356,45 @@ async function init(netID) {
     });
   } catch (error) {
     console.error("Failed to fetch solved problems from Firestore:", error);
+  }
+}
+
+// A signoff can be requested from THIS page for a future week, and a
+// student may never open the dashboard afterwards. Without this the
+// submission would wait for a visit to a page they had no reason to
+// open. Same function as dashboard.js, deliberately duplicated rather
+// than shared: it's twenty lines and both pages own their own state.
+let autoSubmitInFlight = false;
+
+async function runAutoSubmissions() {
+  if (!currentNetID || autoSubmitInFlight) return;
+  autoSubmitInFlight = true;
+  try {
+    for (const submission of pendingAutoSubmissions(currentAssignmentProgress)) {
+      try {
+        const outcome = await sendCanvasSubmission({
+          type: submission.type,
+          assignmentId: submission.assignmentId,
+          weekNum: submission.weekNum,
+          netID: currentNetID,
+          data: submission.data,
+        });
+        if (outcome.ok) {
+          console.log(
+            `[CS 393 Buddy] auto-submitted ${submission.assignmentId} to Canvas`,
+          );
+        } else {
+          console.error(
+            `[CS 393 Buddy] auto-submit failed for ${submission.assignmentId}:`,
+            outcome.result,
+          );
+        }
+      } catch (err) {
+        console.error("[CS 393 Buddy] auto-submit threw:", err);
+      }
+    }
+  } finally {
+    autoSubmitInFlight = false;
   }
 }
 
@@ -371,6 +413,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentAssignmentProgress =
       changes[ASSIGNMENT_PROGRESS_CACHE_KEY].newValue?.progress ?? {};
     needsRender = true;
+    // The moment a TA's decision reaches this page.
+    runAutoSubmissions();
   }
   if (changes[OA_SESSION_KEY]) {
     currentActiveOa = changes[OA_SESSION_KEY].newValue ?? null;

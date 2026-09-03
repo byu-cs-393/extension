@@ -28,12 +28,17 @@ export function isAutoSubmitType(type) {
   return AUTO_SUBMIT_TYPES.has(type);
 }
 
-// Everything needed to send one submission, or null if this item isn't
-// ready. Null is the normal case — most cards, most of the time.
+// Everything needed to send one submission, or null if this one isn't
+// ready. Null is the normal case — most assignments, most of the time.
 //
-export function autoSubmission(item, progress) {
-  if (!item || !isAutoSubmitType(item.type)) return null;
-  if (!item.assignmentId) return null;
+// Driven by the PROGRESS DOCUMENT, not by a week's cards. The dashboard
+// only loads past and current weeks, but a student can request a signoff
+// for a future week's exam from the full-course page — so scanning cards
+// silently skipped exactly those, and the submission never went out. The
+// progress doc already carries everything needed.
+export function autoSubmission(progress) {
+  if (!progress || !isAutoSubmitType(progress.type)) return null;
+  if (!progress.assignmentId) return null;
   if (progress?.status !== "passed") return null;
   // Already sent. Resubmission stays possible from the card, but it isn't
   // automatic — re-sending on every dashboard load would spam Canvas with
@@ -44,14 +49,15 @@ export function autoSubmission(item, progress) {
     .toISOString()
     .slice(0, 10);
 
-  if (item.type === "performance") {
+  if (progress.type === "performance") {
     // No solution link. A TA watches this one happen, so their word plus
     // the recorded editor session is better evidence than a URL pasted in
     // afterwards — and it was the one field the TA couldn't supply, which
     // is what kept a manual step in the flow.
     return {
-      assignmentId: item.assignmentId,
-      type: item.type,
+      assignmentId: progress.assignmentId,
+      type: progress.type,
+      weekNum: Number.isFinite(progress.weekNum) ? progress.weekNum : null,
       data: {
         date,
         workedWith: progress.signoffTaNetID ?? "",
@@ -66,8 +72,9 @@ export function autoSubmission(item, progress) {
   // to grade themselves after a TA had already signed them off was the
   // last thing keeping a manual step in this flow.
   return {
-    assignmentId: item.assignmentId,
-    type: item.type,
+    assignmentId: progress.assignmentId,
+    type: progress.type,
+    weekNum: Number.isFinite(progress.weekNum) ? progress.weekNum : null,
     data: {
       date,
       howItWent: progress.signoffHowItWent ?? "",
@@ -86,9 +93,11 @@ function attemptNumberFrom(progress) {
   return progress?.failedAt || progress?.signoffFailedCount ? 2 : 1;
 }
 
-// Everything on a week that should submit itself, in one call.
-export function pendingAutoSubmissions(items, assignmentProgress) {
-  return (items ?? [])
-    .map((item) => autoSubmission(item, assignmentProgress?.[item?.assignmentId]))
+// Everything awaiting submission, across every week. Takes the whole
+// assignmentProgress map, so nothing is missed because its week hasn't
+// started yet.
+export function pendingAutoSubmissions(assignmentProgress) {
+  return Object.values(assignmentProgress ?? {})
+    .map((progress) => autoSubmission(progress))
     .filter(Boolean);
 }
