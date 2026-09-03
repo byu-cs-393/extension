@@ -478,10 +478,17 @@ window.addEventListener("locationchange", onLocationChange);
 
 // ---- Recording badge ---------------------------------------------------
 
+// Returns false when another copy of the extension already owns the
+// badge — see claimRecordingSlot.
 function mountBadge() {
-  if (document.getElementById("cs393-recording-badge")) return;
+  const existing = document.getElementById("cs393-recording-badge");
+  if (existing) return existing.dataset.cs393ExtensionId === extensionId();
   const badge = document.createElement("div");
   badge.id = "cs393-recording-badge";
+  // Stamped so a second copy can recognise the badge as someone else's.
+  // Extensions have separate isolated worlds and can't see each other
+  // directly, but they share the page's DOM.
+  badge.dataset.cs393ExtensionId = extensionId();
   badge.setAttribute("aria-label", "CS 393 Buddy: keystroke recording active");
   badge.style.cssText = [
     "position: fixed",
@@ -529,6 +536,48 @@ function markBadgeStopped() {
   badge.textContent = "⏸ CS 393 recording stopped — reload page";
 }
 
+function extensionId() {
+  try {
+    return chrome.runtime?.id ?? "unknown";
+  } catch (_error) {
+    return "unknown";
+  }
+}
+
+// Exactly one copy of the extension may record a page.
+//
+// Two copies installed at once — the usual cause being an update unzipped
+// to a NEW folder and loaded without removing the old one — means two
+// content scripts, each opening its own session and recording every
+// keystroke. Every number downstream doubles: active time, pasted
+// characters, edit counts.
+//
+// It was completely invisible: the badge lives in the shared page DOM and
+// mountBadge skips if one already exists, so two copies still show one
+// badge and look normal.
+//
+// First to mount wins and records. The second goes dormant and rewrites
+// the badge to say so, because a silently dormant copy is no better than
+// a silently duplicating one.
+function claimRecordingSlot() {
+  if (mountBadge()) return true;
+  const badge = document.getElementById("cs393-recording-badge");
+  if (badge) {
+    badge.style.background = "rgba(217, 119, 6, 0.95)";
+    badge.textContent = "⚠ CS 393 — two copies installed";
+    badge.setAttribute(
+      "aria-label",
+      "CS 393 Buddy: two copies of the extension are installed",
+    );
+  }
+  console.error(
+    "[CS 393 Buddy] another copy of this extension is already recording " +
+      "this page, so this one will not. Two copies double every recorded " +
+      "session. Remove the old one at chrome://extensions.",
+  );
+  return false;
+}
+
 // ---- Bootstrap ---------------------------------------------------------
 
 (async () => {
@@ -543,9 +592,10 @@ function markBadgeStopped() {
 
   console.log("[CS 393 Buddy] keystroke tracker active");
 
+  if (!claimRecordingSlot()) return;
+
   injectPageScript();
   watchForInjector();
-  mountBadge();
   // Kick off the first session if we're already on a problem page.
   const slug = parseProblemSlug(location.href);
   if (slug) newSession(slug);

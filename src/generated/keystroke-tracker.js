@@ -417,9 +417,11 @@
   window.addEventListener("popstate", onLocationChange);
   window.addEventListener("locationchange", onLocationChange);
   function mountBadge() {
-    if (document.getElementById("cs393-recording-badge")) return;
+    const existing = document.getElementById("cs393-recording-badge");
+    if (existing) return existing.dataset.cs393ExtensionId === extensionId();
     const badge = document.createElement("div");
     badge.id = "cs393-recording-badge";
+    badge.dataset.cs393ExtensionId = extensionId();
     badge.setAttribute("aria-label", "CS 393 Buddy: keystroke recording active");
     badge.style.cssText = [
       "position: fixed",
@@ -458,6 +460,29 @@
     badge.style.background = "rgba(120, 113, 108, 0.95)";
     badge.textContent = "\u23F8 CS 393 recording stopped \u2014 reload page";
   }
+  function extensionId() {
+    try {
+      return chrome.runtime?.id ?? "unknown";
+    } catch (_error) {
+      return "unknown";
+    }
+  }
+  function claimRecordingSlot() {
+    if (mountBadge()) return true;
+    const badge = document.getElementById("cs393-recording-badge");
+    if (badge) {
+      badge.style.background = "rgba(217, 119, 6, 0.95)";
+      badge.textContent = "\u26A0 CS 393 \u2014 two copies installed";
+      badge.setAttribute(
+        "aria-label",
+        "CS 393 Buddy: two copies of the extension are installed"
+      );
+    }
+    console.error(
+      "[CS 393 Buddy] another copy of this extension is already recording this page, so this one will not. Two copies double every recorded session. Remove the old one at chrome://extensions."
+    );
+    return false;
+  }
   (async () => {
     const { netID: stored } = await chrome.storage.sync.get("netID");
     if (!stored) {
@@ -468,9 +493,9 @@
     }
     netID = stored;
     console.log("[CS 393 Buddy] keystroke tracker active");
+    if (!claimRecordingSlot()) return;
     injectPageScript();
     watchForInjector();
-    mountBadge();
     const slug = parseProblemSlug(location.href);
     if (slug) newSession(slug);
     flushTimer = setInterval(() => flushBuffer(), FLUSH_INTERVAL_MS);
