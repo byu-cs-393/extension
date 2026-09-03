@@ -127,6 +127,16 @@ function createWeekSection(cards, status) {
     status === "future" ? createFuturePlaceholder(cards) : createRecommendedCard(cards, status),
   );
   for (const item of cards.performanceItems ?? []) {
+    // OAs stay on the calendar. Everything else unlocked above is
+    // something that needs a TA's time — performance exams, live
+    // interviews, peer mocks — and squeezing those into the week they
+    // fall in is a scheduling problem, not a pacing one. An OA is
+    // self-serve, so releasing it early just lets a student sprint the
+    // course, which is the opposite of what the weekly structure is for.
+    if (status === "future" && item.type === "oa") {
+      section.appendChild(createLockedOaCard(item, cards));
+      continue;
+    }
     const cardEl = createThirdCardSection(
       item,
       currentProgress?.[cards.week] ?? null,
@@ -144,6 +154,28 @@ function createWeekSection(cards, status) {
     if (cardEl) section.appendChild(cardEl);
   }
   return section;
+}
+
+// A visible, explained lock rather than an absent card — a student who
+// knows the OA exists should be told when it opens, not left wondering
+// why it vanished from a week that shows everything else.
+function createLockedOaCard(item, cards) {
+  const article = document.createElement("article");
+  article.className = "card future-placeholder";
+
+  const title = document.createElement("div");
+  title.className = "card-title";
+  title.textContent = item.title ?? "Online Assessment";
+  article.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  meta.textContent =
+    cards.startMs != null
+      ? `Opens ${SHORT_DATE.format(new Date(cards.startMs))} — OAs run on the week's schedule.`
+      : "Opens with this week — OAs run on the week's schedule.";
+  article.appendChild(meta);
+  return article;
 }
 
 function createFuturePlaceholder(cards) {
