@@ -17,6 +17,8 @@ import {
 } from "../data/course-data.js";
 import { recordSignoffDecision } from "../data/assignment-progress.js";
 import { registerAsStaff } from "../data/staff.js";
+import { autoSubmission } from "../data/auto-submit.js";
+import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
   fetchKeystrokeSessions,
   renderKeystrokeSection,
@@ -350,7 +352,7 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
           if (signoffHowLong == null) return reEnable();
         }
       }
-      await recordSignoffDecision({
+      const progress = await recordSignoffDecision({
         studentNetID: item.netID,
         taNetID: await getCurrentTaNetID(),
         assignmentId: item.assignmentId,
@@ -359,6 +361,12 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
         ...(signoffHowLong ? { signoffHowLong } : {}),
         ...(signoffHowItWent ? { signoffHowItWent } : {}),
       });
+      // Submit right here rather than waiting for the student. Leaving it
+      // to their session meant a signoff reached Canvas only when they
+      // next opened the extension — days later, or at the end of term,
+      // or never. The student's own dashboard still retries as a
+      // fallback; the timestamp guard makes that harmless.
+      await submitForStudent(item, progress);
     } else {
       // Legacy path — topicExam on weekProgress.
       const now = Date.now();
@@ -389,6 +397,37 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
 function promptForText(message) {
   const raw = window.prompt(message);
   return raw == null ? null : raw.trim();
+}
+
+// Sends the Canvas submission on the student's behalf. Best-effort: the
+// signoff is already recorded, and the student's dashboard will retry
+// this if it fails, so a Canvas hiccup must not make the Pass look like
+// it didn't take.
+async function submitForStudent(item, progress) {
+  const submission = autoSubmission(progress);
+  if (!submission) return;
+  try {
+    const outcome = await sendCanvasSubmission({
+      type: submission.type,
+      assignmentId: submission.assignmentId,
+      weekNum: submission.weekNum,
+      netID: item.netID,
+      forNetID: item.netID,
+      data: submission.data,
+    });
+    if (outcome.ok) {
+      console.log(
+        `[CS 393 Buddy] submitted ${submission.assignmentId} to Canvas for ${item.netID}`,
+      );
+    } else {
+      console.error(
+        `[CS 393 Buddy] couldn't submit ${submission.assignmentId} for ${item.netID}:`,
+        outcome.result,
+      );
+    }
+  } catch (err) {
+    console.error("[CS 393 Buddy] submit-for-student threw:", err);
+  }
 }
 
 function promptForRating() {

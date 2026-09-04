@@ -364,6 +364,11 @@ function buildFieldRow(field, prefillValue) {
 //
 // Returns { ok, result }. Never throws for a Canvas-side failure; the
 // caller decides how to surface it.
+// `forNetID` submits on another student's behalf — only a TA's token is
+// allowed to, and the Cloud Function enforces that. When set, the caller
+// is NOT the student, so the local progress cache belongs to someone else
+// and must not be touched; the Firestore write still lands on the
+// student's own document.
 export async function sendCanvasSubmission({
   type,
   assignmentId,
@@ -372,6 +377,7 @@ export async function sendCanvasSubmission({
   data,
   fieldValues = data,
   submissionType = "online_text_entry",
+  forNetID = null,
 }) {
   let payload;
   if (submissionType === "online_url") {
@@ -383,6 +389,7 @@ export async function sendCanvasSubmission({
       body: fillSubmissionTemplate({ type, assignmentId, data }),
     };
   }
+  if (forNetID) payload.forNetID = forNetID;
 
   const result = await new Promise((resolve) => {
     chrome.runtime.sendMessage(
@@ -399,6 +406,19 @@ export async function sendCanvasSubmission({
   const submittedAt = Date.now();
   const progressType = progressTypeFor({ type, assignmentId });
   try {
+    // Submitting for someone else: write their Firestore doc, but leave
+    // the local cache alone — it's this TA's, and the entry would be a
+    // stranger's progress sitting in their own dashboard.
+    if (forNetID) {
+      await patchDoc(`students/${forNetID}/assignmentProgress/${assignmentId}`, {
+        assignmentId,
+        type: progressType,
+        canvasSubmittedAt: submittedAt,
+        canvasSubmissionId: result.canvasSubmissionId ?? null,
+        ...(Number.isFinite(weekNum) ? { weekNum } : {}),
+      });
+      return { ok: true, result, submittedAt };
+    }
     // Read the cached doc BEFORE writing, both to carry forward fields
     // this caller doesn't own (signoff status) and to know how many times
     // this has been submitted already.

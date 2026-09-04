@@ -1309,10 +1309,41 @@ exports.submitCanvasAssignment = onRequest(
       res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
       return;
     }
-    const netID = decoded.uid;
+    const callerNetID = decoded.uid;
 
     // Body validation.
-    const { assignmentId, submissionType, body, url } = req.body ?? {};
+    const { assignmentId, submissionType, body, url, forNetID } = req.body ?? {};
+
+    // A TA submitting on a student's behalf.
+    //
+    // Without this the submission can only come from the student's OWN
+    // session, because the netID is taken from the caller's token. That
+    // meant a TA could sign someone off and nothing reached Canvas until
+    // that student happened to open the extension again — days later, or
+    // at the end of term, never.
+    //
+    // Gated on the `role: ta` claim, which verifyStudent mints only after
+    // confirming the caller's Canvas enrolment as a TA or instructor. A
+    // student's token carries no such claim, so this cannot be used to
+    // submit as somebody else.
+    let netID = callerNetID;
+    if (typeof forNetID === "string" && forNetID && forNetID !== callerNetID) {
+      if (decoded.role !== "ta") {
+        res.status(403).json({
+          error: "Only a TA may submit on another student's behalf.",
+          code: "permission-denied",
+        });
+        return;
+      }
+      if (!/^[a-z][a-z0-9]{1,15}$/.test(forNetID)) {
+        res.status(400).json({ error: "Invalid forNetID.", code: "invalid-argument" });
+        return;
+      }
+      netID = forNetID;
+      console.log(
+        `[submitCanvasAssignment] ${callerNetID} (ta) submitting for ${netID}`,
+      );
+    }
     if (typeof assignmentId !== "string" || !assignmentId) {
       res.status(400).json({ error: "Missing assignmentId.", code: "invalid-argument" });
       return;
