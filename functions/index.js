@@ -32,6 +32,7 @@ initializeApp();
 // Token must have permission to look up student profiles via
 // /api/v1/users/sis_login_id:<netID>/profile.
 const canvasToken = defineSecret("CANVAS_API_TOKEN");
+const anthropicKey = defineSecret("ANTHROPIC_API_KEY");
 
 const CANVAS_BASE = "https://byu.instructure.com";
 
@@ -1467,3 +1468,160 @@ async function logRun(db, runId, doc) {
     console.error(`[submitCanvasAssignment] logRun failed for ${runId}:`, err);
   }
 }
+
+
+// ---- Problem suggestions -------------------------------------------------
+//
+// Ranks a shortlist of practice problems and writes a one-line reason for
+// each. The shortlist itself is chosen on the client by
+// src/data/problem-suggestions.js — deterministic, tested, and offline.
+// This function exists for two reasons only: the API key can't ship in an
+// extension students can unzip, and results should be cached somewhere
+// shared rather than per-device.
+//
+// The model cannot widen the shortlist. Picks are matched back against
+// the candidates that were sent, and anything else is dropped — see
+// pickFromCandidates. That's what keeps a later week's OA problem from
+// surfacing as a suggestion even if the model names one.
+
+const {
+  buildRequest,
+  pickFromCandidates,
+  fallbackPicks,
+} = require("./suggestion-prompt.js");
+
+const SUGGESTION_MODEL = "claude-sonnet-5";
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+
+// A shortlist fingerprint. Cached suggestions are reused only while the
+// inputs that produced them are unchanged — solve a problem and the
+// shortlist shifts, the hash changes, and the next request regenerates.
+function shortlistHash(candidates, limit) {
+  const basis = `${limit}:${candidates.map((c) => c.slug).join(",")}`;
+  return require("node:crypto").createHash("sha256").update(basis).digest("hex").slice(0, 16);
+}
+
+exports.suggestProblems = onRequest(
+  {
+    secrets: [anthropicKey],
+    region: "us-central1",
+    cors: true,
+  },
+  async (req, res) => {
+    // Manual CORS, same reasoning as the other functions here: Hosting
+    // can answer the preflight before the function's middleware runs.
+    const origin = req.get("origin") ?? "*";
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Max-Age", "3600");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (_err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+    const netID = decoded.uid;
+
+    const { weekNum, week, candidates, signals, limit } = req.body ?? {};
+    if (!Number.isInteger(weekNum)) {
+      res.status(400).json({ error: "weekNum must be an integer.", code: "invalid-argument" });
+      return;
+    }
+    const wanted = Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 8) : 4;
+
+    const { body: requestBody, candidates: clean } = buildRequest({
+      week,
+      candidates,
+      signals,
+      limit: wanted,
+      model: SUGGESTION_MODEL,
+    });
+    if (clean.length === 0) {
+      res.status(400).json({
+        error: "No usable candidates were supplied.",
+        code: "invalid-argument",
+      });
+      return;
+    }
+
+    const db = getFirestore();
+    const cacheRef = db.doc(`students/${netID}/suggestions/${weekNum}`);
+    const hash = shortlistHash(clean, wanted);
+
+    // Cache hit: the same student, week, and shortlist as last time.
+    try {
+      const cached = await cacheRef.get();
+      if (cached.exists && cached.data()?.hash === hash) {
+        res.status(200).json({
+          picks: cached.data().picks ?? [],
+          cached: true,
+          generatedAt: cached.data().generatedAt ?? null,
+        });
+        return;
+      }
+    } catch (err) {
+      // A cache read failure is not worth failing the request over.
+      console.error(`[suggestProblems] cache read failed for ${netID}:`, err);
+    }
+
+    let picks = [];
+    let degraded = false;
+    try {
+      const response = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": anthropicKey.value(),
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(requestBody),
+      });
+      if (!response.ok) {
+        throw new Error(`Anthropic ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      }
+      picks = pickFromCandidates(await response.json(), clean);
+    } catch (err) {
+      console.error(`[suggestProblems] model call failed for ${netID}:`, err);
+      degraded = true;
+    }
+
+    // The shortlist arrived already ordered by the deterministic scorer,
+    // so an unreachable or unusable model costs the explanations, not the
+    // suggestions. Better a plainer card than an empty one.
+    if (picks.length === 0) {
+      picks = fallbackPicks(clean, wanted);
+      degraded = true;
+    }
+
+    const generatedAt = Date.now();
+    try {
+      // Don't cache a degraded result — the next open should try again
+      // rather than pin a fallback in place for the rest of the week.
+      if (!degraded) {
+        await cacheRef.set({ hash, picks, generatedAt, weekNum });
+      }
+    } catch (err) {
+      console.error(`[suggestProblems] cache write failed for ${netID}:`, err);
+    }
+
+    res.status(200).json({ picks, cached: false, degraded, generatedAt });
+  }
+);

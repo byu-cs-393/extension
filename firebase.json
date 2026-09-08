@@ -71,6 +71,13 @@
           "serviceId": "submitcanvasassignment",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/suggestProblems",
+        "run": {
+          "serviceId": "suggestproblems",
+          "region": "us-central1"
+        }
       }
     ]
   }

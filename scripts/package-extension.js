@@ -40,6 +40,7 @@ const OUT_DIR = join(ROOT, "release");
 const SHIP = [
   "manifest.json",
   "course.json",
+  "leetcode-catalog.json",   // the pool suggestions are drawn from
   "icons",
   "generated",   // bundled content scripts (manifest points here)
   "pages",       // one entry point per HTML page
