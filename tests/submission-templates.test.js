@@ -493,3 +493,50 @@ describe("fillStudyTemplate — growth checklist", () => {
     expect(body).toContain("<li>re-timed myself</li>");
   });
 });
+
+describe("fillStudyTemplate — TA review request", () => {
+  const problem = () => ({
+    title: "Two Sum", tag: "required", solved: true,
+    problemUrl: "https://leetcode.com/problems/two-sum/",
+    acceptedUrl: "https://leetcode.com/problems/two-sum/submissions/1/",
+  });
+
+  it("accepts a plain problem name", () => {
+    // The TA already has every submission link from this week, so naming
+    // the problem is enough. Requiring a URL meant a student typing
+    // "Two Sum" couldn't submit at all.
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      taReview: "Two Sum — my hash map approach felt clumsy",
+    });
+    expect(body).toContain("Would like a TA to review");
+    expect(body).toContain("hash map approach felt clumsy");
+  });
+
+  it("still links a URL if someone pastes one", () => {
+    const url = "https://leetcode.com/problems/two-sum/submissions/1046917577/";
+    const body = fillStudyTemplate({ problems: [problem()], taReview: url });
+    expect(body).toContain(`<a href="${url}"`);
+  });
+
+  it("renders a URL saved under the old field name", () => {
+    // Resubmissions prefilled from a submission made before this change.
+    const url = "https://leetcode.com/problems/two-sum/submissions/999/";
+    const body = fillStudyTemplate({ problems: [problem()], taReviewUrl: url });
+    expect(body).toContain(`<a href="${url}"`);
+  });
+
+  it("renders an empty line when nothing was asked for", () => {
+    const body = fillStudyTemplate({ problems: [problem()] });
+    expect(body).toContain("Would like a TA to review");
+    expect(body).not.toContain("<a href=\"\"");
+  });
+
+  it("escapes what the student typed", () => {
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      taReview: "<img src=x onerror=alert(1)>",
+    });
+    expect(body).not.toContain("<img");
+  });
+});

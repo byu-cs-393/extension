@@ -119,7 +119,11 @@ const SCHEMAS_BY_TYPE = {
           { value: "Just finished and moved on", label: "Just finished and moved on" },
         ] },
       { name: "growthOther", label: "Anything else you did for growth", type: "text", placeholder: "(optional)" },
-      { name: "taReviewUrl", label: "Want a TA to review a solution? Paste the submission link (optional)", type: "url" },
+      // Free text, not a URL. The TA already has every submission link
+      // from this week's problems, so naming the problem is enough — and
+      // type: "url" rejected anything that wasn't one, which meant a
+      // student typing "Two Sum" couldn't submit at all.
+      { name: "taReview", label: "Want a TA to review a solution? (optional)", type: "text", placeholder: "e.g. Two Sum — my hash map approach felt clumsy" },
     ],
   },
 };

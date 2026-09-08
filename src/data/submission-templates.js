@@ -194,7 +194,8 @@ export function fillStudyTemplate({
   personalHours,
   growthActions,
   growthOther,
-  taReviewUrl,
+  taReview,
+  taReviewUrl, // pre-checklist submissions stored a URL under the old name
   trackedMs,
 }) {
   const probs = Array.isArray(problems) ? problems : [];
@@ -251,7 +252,7 @@ export function fillStudyTemplate({
     pLabelValue("Personal study", personalHours != null ? `${personalHours} hrs` : "") +
     trackedTimeLine(trackedMs) +
     growthLines(growthActions, growthOther) +
-    pLabelUrl("TA review request (paste the submission link)", taReviewUrl) +
+    taReviewLine(taReview, taReviewUrl) +
     pointsSummary(breakdown)
   );
 }
@@ -260,6 +261,20 @@ export function fillStudyTemplate({
 // as an array. Rendered as a list rather than a comma-joined line: it's
 // several distinct claims about how someone studied, and a grader reads
 // them one at a time.
+// Naming the problem is enough — the TA has the week's submission links
+// already. A pasted URL from an older submission still renders as a link.
+function taReviewLine(taReview, taReviewUrl) {
+  const text = typeof taReview === "string" ? taReview.trim() : "";
+  if (text) {
+    return /^https?:\/\//i.test(text)
+      ? pLabelUrl("Would like a TA to review", text)
+      : pLabelValue("Would like a TA to review", text);
+  }
+  return taReviewUrl
+    ? pLabelUrl("Would like a TA to review", taReviewUrl)
+    : pLabelValue("Would like a TA to review", "");
+}
+
 function growthLines(growthActions, growthOther) {
   const ticked = Array.isArray(growthActions)
     ? growthActions.filter(Boolean)
