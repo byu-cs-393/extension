@@ -193,6 +193,7 @@ export function fillStudyTemplate({
   collabWithWhom,
   personalHours,
   growthActions,
+  growthOther,
   taReviewUrl,
   trackedMs,
 }) {
@@ -249,13 +250,29 @@ export function fillStudyTemplate({
     pLabelValue("Collaborative study", collab) +
     pLabelValue("Personal study", personalHours != null ? `${personalHours} hrs` : "") +
     trackedTimeLine(trackedMs) +
-    pLabelValue(
-      "For growth I did (mark any: re-timed / re-did without lookups / studied others' solutions / just finished / other)",
-      growthActions,
-    ) +
+    growthLines(growthActions, growthOther) +
     pLabelUrl("TA review request (paste the submission link)", taReviewUrl) +
     pointsSummary(breakdown)
   );
+}
+
+// The professor's growth question is a checklist, so the answer arrives
+// as an array. Rendered as a list rather than a comma-joined line: it's
+// several distinct claims about how someone studied, and a grader reads
+// them one at a time.
+function growthLines(growthActions, growthOther) {
+  const ticked = Array.isArray(growthActions)
+    ? growthActions.filter(Boolean)
+    : growthActions
+      ? [growthActions]
+      : [];
+  const other = typeof growthOther === "string" ? growthOther.trim() : "";
+  if (ticked.length === 0 && !other) {
+    return pLabelValue("For growth I did", "");
+  }
+  const items = ticked.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
+  const otherItem = other ? `<li>${escapeHtml(other)}</li>` : "";
+  return `<p><strong>For growth I did:</strong></p><ul>${items}${otherItem}</ul>`;
 }
 
 function problemListItem(p) {

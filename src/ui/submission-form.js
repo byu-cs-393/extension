@@ -110,7 +110,15 @@ const SCHEMAS_BY_TYPE = {
       { name: "collabHours", label: "Collaborative study hours", type: "number", required: true, min: 0, step: 0.5 },
       { name: "collabWithWhom", label: "Studied with whom?", type: "text", placeholder: "(optional)" },
       { name: "personalHours", label: "Personal study hours", type: "number", required: true, min: 0, step: 0.5 },
-      { name: "growthActions", label: "For growth I did (mark any)", type: "textarea", placeholder: "re-timed / re-did without lookups / studied others' solutions / just finished / other:" },
+      // The professor's five options verbatim, as checkboxes — his
+      // template says "mark any", and more than one usually applies.
+      { name: "growthActions", label: "For growth I did (mark any)", type: "checkboxes", options: [
+          { value: "Re-did it and timed myself", label: "Re-did it and timed myself" },
+          { value: "Re-did it without looking up syntax/solutions", label: "Re-did it without looking up syntax or solutions" },
+          { value: "Studied others' solutions after solving to learn from them", label: "Studied others' solutions after solving" },
+          { value: "Just finished and moved on", label: "Just finished and moved on" },
+        ] },
+      { name: "growthOther", label: "Anything else you did for growth", type: "text", placeholder: "(optional)" },
       { name: "taReviewUrl", label: "Want a TA to review a solution? Paste the submission link (optional)", type: "url" },
     ],
   },
@@ -322,6 +330,31 @@ function buildFieldRow(field, prefillValue) {
   const label = el("label", { htmlFor: labelId, className: "cs393-submit-label" }, field.label + (field.required ? " *" : ""));
   row.appendChild(label);
 
+  // "mark any" — the professor's template lists these as checkboxes, and
+  // several genuinely apply at once. A <select multiple> would hide them
+  // behind a scroll box and require ctrl-click to pick more than one.
+  if (field.type === "checkboxes") {
+    const group = el("div", { className: "cs393-submit-checkboxes" });
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", field.label);
+    const checked = new Set(
+      Array.isArray(prefillValue) ? prefillValue : prefillValue ? [prefillValue] : [],
+    );
+    for (const opt of field.options ?? []) {
+      const id = `cs393-f-${field.name}-${opt.value.replace(/\W+/g, "-")}`;
+      const box = el("input", { id, name: field.name, type: "checkbox", value: opt.value });
+      if (checked.has(opt.value)) box.checked = true;
+      const optLabel = el("label", { htmlFor: id, className: "cs393-submit-check" });
+      optLabel.append(box, document.createTextNode(` ${opt.label}`));
+      group.appendChild(optLabel);
+    }
+    row.appendChild(group);
+    if (field.help) {
+      row.appendChild(el("div", { className: "cs393-submit-help" }, field.help));
+    }
+    return row;
+  }
+
   let input;
   if (field.type === "textarea") {
     input = el("textarea", { id: labelId, name: field.name, className: "cs393-submit-input", rows: 3 });
@@ -475,6 +508,12 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
     const fieldValues = {};
     const formData = new FormData(form);
     for (const field of schema.fields) {
+      // A checkbox group has one entry per ticked box, so getAll is the
+      // only way to see more than the first.
+      if (field.type === "checkboxes") {
+        fieldValues[field.name] = formData.getAll(field.name);
+        continue;
+      }
       const raw = formData.get(field.name);
       // Numbers come out as strings — coerce.
       if (field.type === "number" && raw != null && raw !== "") {
@@ -574,6 +613,27 @@ function ensureStyles() {
       padding: 24px 28px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
       font: 14px/1.4 system-ui, -apple-system, sans-serif;
+    }
+    .cs393-submit-checkboxes {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 2px 0;
+    }
+    .cs393-submit-check {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #1f2937;
+      cursor: pointer;
+      font-weight: 400;
+    }
+    .cs393-submit-check input {
+      margin: 2px 0 0 0;
+      flex: none;
+      cursor: pointer;
     }
     .cs393-submit-resubmit-note {
       margin: 0 0 12px 0;

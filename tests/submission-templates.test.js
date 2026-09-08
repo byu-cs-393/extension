@@ -438,3 +438,58 @@ describe("fillStudyTemplate — untracked assignments", () => {
     expect(body).not.toContain("not auto-tracked");
   });
 });
+
+describe("fillStudyTemplate — growth checklist", () => {
+  const problem = () => ({
+    title: "Two Sum", tag: "required", solved: true,
+    problemUrl: "https://leetcode.com/problems/two-sum/",
+    acceptedUrl: "https://leetcode.com/problems/two-sum/submissions/1/",
+  });
+
+  it("lists every option the student ticked", () => {
+    // "Mark any" — several genuinely apply at once, so this arrives as an
+    // array rather than a sentence.
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      growthActions: ["Re-did it and timed myself", "Just finished and moved on"],
+    });
+    expect(body).toContain("<strong>For growth I did:</strong>");
+    expect(body).toContain("<li>Re-did it and timed myself</li>");
+    expect(body).toContain("<li>Just finished and moved on</li>");
+  });
+
+  it("appends free-text after the ticked options", () => {
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      growthActions: ["Re-did it and timed myself"],
+      growthOther: "Explained it to a roommate",
+    });
+    expect(body).toContain("<li>Explained it to a roommate</li>");
+  });
+
+  it("handles free-text with nothing ticked", () => {
+    const body = fillStudyTemplate({ problems: [problem()], growthOther: "Rewrote it in Rust" });
+    expect(body).toContain("<li>Rewrote it in Rust</li>");
+  });
+
+  it("still renders when nothing was selected", () => {
+    const body = fillStudyTemplate({ problems: [problem()] });
+    expect(body).toContain("For growth I did");
+    expect(body).not.toContain("<li></li>");
+  });
+
+  it("escapes what the student typed", () => {
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      growthOther: "<script>alert(1)</script>",
+    });
+    expect(body).not.toContain("<script>");
+  });
+
+  it("accepts a plain string from an older submission", () => {
+    // canvasSubmissionData saved before this was a checklist prefills a
+    // resubmission with a string.
+    const body = fillStudyTemplate({ problems: [problem()], growthActions: "re-timed myself" });
+    expect(body).toContain("<li>re-timed myself</li>");
+  });
+});
