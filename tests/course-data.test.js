@@ -16,6 +16,7 @@ import {
   deriveScheduleItemId,
   studyAssignmentIdForWeek,
   studyProblemsForWeek,
+  untrackedProblemsForWeek,
   firstUnsolvedProblem,
   translateOaToRuntimeShape,
 } from "../src/data/course-data.js";
@@ -443,5 +444,62 @@ describe("getSignoffStaff", () => {
     withStaff(undefined);
     const { getSignoffStaff } = await import(`../src/data/course-data.js?staff=3`);
     expect(await getSignoffStaff()).toEqual([]);
+  });
+});
+
+describe("assignments that aren't LeetCode problems", () => {
+  // Week 2 assigns a "Big O Together Quiz" on a slides deck alongside
+  // three LeetCode problems. It was invisible in the UI (the problem list
+  // needs a LeetCode slug) while still counting toward the study
+  // submission's denominator — so a student saw three, did three, and
+  // lost a point to a fourth they were never shown.
+  const cards = {
+    placements: {
+      class1: [
+        { name: "Big O Together Quiz", url: "https://docs.google.com/presentation/d/x/edit", tag: "in class" },
+        { name: "LRU Cache", url: "https://leetcode.com/problems/lru-cache/", tag: "in class" },
+      ],
+      outside: [
+        { notes: "Do easy problems if you have extra time!", tag: "recommended" },
+        { name: "A reading", url: "https://example.com/reading", tag: "required" },
+      ],
+    },
+  };
+
+  it("keeps only LeetCode problems in the trackable list", () => {
+    expect(studyProblemsForWeek(cards).map((p) => p.title)).toEqual(["LRU Cache"]);
+  });
+
+  it("collects the non-LeetCode assignments separately", () => {
+    expect(untrackedProblemsForWeek(cards).map((p) => p.title)).toEqual([
+      "Big O Together Quiz",
+      "A reading",
+    ]);
+  });
+
+  it("ignores items with no URL at all", () => {
+    // Free-form notes like "do easy problems if you have time" aren't
+    // assignments and shouldn't appear anywhere.
+    const titles = untrackedProblemsForWeek(cards).map((p) => p.title);
+    expect(titles).not.toContain(undefined);
+    expect(titles.some((t) => /extra time/.test(t))).toBe(false);
+  });
+
+  it("ignores recommended-only items", () => {
+    const optional = {
+      placements: { outside: [{ name: "Optional", url: "https://example.com/x", tag: "recommended" }] },
+    };
+    expect(untrackedProblemsForWeek(optional)).toEqual([]);
+  });
+
+  it("returns [] for a week with no placements", () => {
+    expect(untrackedProblemsForWeek({})).toEqual([]);
+    expect(untrackedProblemsForWeek(null)).toEqual([]);
+  });
+
+  it("does not let an untracked item drag the solved ratio down", () => {
+    // The point that was being lost: 1 of 1 solvable, not 1 of 2.
+    expect(studyProblemsForWeek(cards)).toHaveLength(1);
+    expect(untrackedProblemsForWeek(cards)).toHaveLength(2);
   });
 });

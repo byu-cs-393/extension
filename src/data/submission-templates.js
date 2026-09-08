@@ -188,6 +188,7 @@ export function fillConnectWithClassTemplate({
 // can compare the two.
 export function fillStudyTemplate({
   problems,
+  untracked,
   collabHours,
   collabWithWhom,
   personalHours,
@@ -208,6 +209,24 @@ export function fillStudyTemplate({
       `<ul>${unsolved.map(problemListItem).join("")}</ul>`
     : "";
 
+  // Assigned work the extension can't watch — an in-class quiz on a
+  // slide deck, a reading. Listed so the grader sees it, and outside the
+  // solved/total count because nothing can tell whether it was done.
+  const untrackedItems = Array.isArray(untracked) ? untracked : [];
+  const untrackedSection = untrackedItems.length
+    ? `<p><strong>Also assigned (not auto-tracked):</strong></p><ul>` +
+      untrackedItems
+        .map(
+          (u) =>
+            `<li>${escapeHtml(u.title ?? "")}` +
+            (u.tag ? ` <em>(${escapeHtml(u.tag)})</em>` : "") +
+            (u.url ? ` — <a href="${escapeAttr(u.url)}">${escapeHtml(u.url)}</a>` : "") +
+            `</li>`,
+        )
+        .join("") +
+      `</ul>`
+    : "";
+
   const collab =
     collabHours != null || collabWithWhom
       ? `${escapeHtml(String(collabHours ?? ""))} hrs${
@@ -226,6 +245,7 @@ export function fillStudyTemplate({
     `<p><strong>Solved this week (${solved.length} of ${probs.length}) — accepted-submission URLs:</strong></p>` +
     `<ul>${solvedItems}</ul>` +
     unsolvedSection +
+    untrackedSection +
     pLabelValue("Collaborative study", collab) +
     pLabelValue("Personal study", personalHours != null ? `${personalHours} hrs` : "") +
     trackedTimeLine(trackedMs) +

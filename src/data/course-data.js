@@ -340,6 +340,35 @@ export function firstUnsolvedProblem(cards, solvesBundle) {
 //
 // Items without a URL (free-form notes like "Do 5 more easy problems")
 // are dropped — the template's URL slot doesn't have a place for them.
+// Assigned work that ISN'T a LeetCode problem — an in-class quiz on a
+// slides deck, a reading with a link. Real assignments the professor
+// grades, but nothing the extension can watch a student complete.
+//
+// They were being dropped from the UI entirely (flattenPlacementsToProblems
+// needs a LeetCode slug) while still counting toward the study submission's
+// denominator, so a student saw three problems, did three problems, and
+// lost a point to a fourth they were never shown. Week 2's "Big O Together
+// Quiz" is the case that surfaced it.
+//
+// Kept separate from the trackable problems rather than mixed in: solve
+// counting has to stay LeetCode-only, because there's no way to know
+// whether someone opened a slide deck.
+export function untrackedProblemsForWeek(cards) {
+  const out = [];
+  for (const bucket of Object.values(cards?.placements ?? {})) {
+    if (!Array.isArray(bucket)) continue;
+    for (const item of bucket) {
+      if (!item?.url) continue;
+      if (extractLeetcodeSlug(item.url)) continue; // trackable elsewhere
+      if (item.tag !== "required" && item.tag !== "in class") continue;
+      out.push({ url: item.url, tag: item.tag, title: item.name ?? item.url });
+    }
+  }
+  return out;
+}
+
+// Only the LeetCode problems — the ones a solve can be detected for.
+// Non-LeetCode assignments come from untrackedProblemsForWeek.
 export function studyProblemsForWeek(cards) {
   if (!cards) return [];
   const out = [];
@@ -347,6 +376,7 @@ export function studyProblemsForWeek(cards) {
     if (!Array.isArray(bucket)) continue;
     for (const item of bucket) {
       if (!item?.url) continue;
+      if (!extractLeetcodeSlug(item.url)) continue;
       if (item.tag !== "required" && item.tag !== "in class") continue;
       out.push({ url: item.url, tag: item.tag, title: item.name });
     }

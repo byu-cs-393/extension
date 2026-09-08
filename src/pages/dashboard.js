@@ -12,6 +12,7 @@ import {
   getOaRuntimeShape,
   getTopics,
   studyProblemsForWeek,
+  untrackedProblemsForWeek,
   studyAssignmentIdForWeek,
 } from "../data/course-data.js";
 import { getSignoffStaff } from "../data/staff.js";
@@ -244,6 +245,14 @@ function createRecommendedCard(cards, status) {
     for (const p of problems) {
       list.appendChild(createProblemItem(p, solvedSet.has(p.slug)));
     }
+    // Assigned work that isn't a LeetCode problem — an in-class quiz on a
+    // slide deck, a reading. These were invisible: the progress list needs
+    // a LeetCode slug, so a student saw three items, did three items, and
+    // never knew about the fourth. Shown without a checkbox, because
+    // nothing can detect whether they were done.
+    for (const u of untrackedProblemsForWeek(cards)) {
+      list.appendChild(createUntrackedItem(u));
+    }
     details.appendChild(list);
     article.appendChild(details);
   }
@@ -289,6 +298,12 @@ function createRecommendedCard(cards, status) {
         solved: slug ? solvedSet.has(slug) : false,
       };
     });
+    // Assigned but not a LeetCode problem — an in-class quiz, a reading.
+    // Listed so the grader sees them, and deliberately kept out of the
+    // solved/total ratio: nothing can detect whether a slide deck was
+    // opened, so counting them would dock a point for work that was
+    // probably done.
+    const untracked = untrackedProblemsForWeek(cards);
     const tracked = trackedActiveMsInWindow(
       currentKeystrokeSessions,
       cards.startMs,
@@ -308,7 +323,7 @@ function createRecommendedCard(cards, status) {
       netID: currentNetID,
       weekNum: cards.week,
     }, {
-      extraSubmitData: { problems, trackedMs: tracked.activeMs },
+      extraSubmitData: { problems, untracked, trackedMs: tracked.activeMs },
     });
   }
 
@@ -319,6 +334,31 @@ function extractLeetcodeSlug(url) {
   if (typeof url !== "string") return null;
   const m = url.match(/^https:\/\/leetcode\.com\/problems\/([^/?#]+)/);
   return m ? m[1] : null;
+}
+
+// No checkbox and no contribution to the count — this is "here, don't
+// forget it", not something the extension is tracking.
+function createUntrackedItem(item) {
+  const li = document.createElement("li");
+  li.className = "untracked-item";
+
+  const mark = document.createElement("span");
+  mark.className = "problem-mark";
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = "•";
+
+  const link = document.createElement("a");
+  link.href = item.url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = item.title;
+
+  const note = document.createElement("span");
+  note.className = "problem-tag";
+  note.textContent = item.tag ? `${item.tag} · not auto-tracked` : "not auto-tracked";
+
+  li.append(mark, link, note);
+  return li;
 }
 
 function createProblemItem(p, isSolved) {

@@ -399,3 +399,42 @@ describe("fillSubmissionTemplate — dispatcher", () => {
     ).toThrow(/No submission template for type=unknown-type/);
   });
 });
+
+describe("fillStudyTemplate — untracked assignments", () => {
+  const problem = (over = {}) => ({
+    title: "LRU Cache",
+    tag: "in class",
+    problemUrl: "https://leetcode.com/problems/lru-cache/",
+    acceptedUrl: null,
+    solved: true,
+    ...over,
+  });
+
+  it("lists work the extension can't track", () => {
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      untracked: [
+        { title: "Big O Together Quiz", tag: "in class", url: "https://docs.google.com/presentation/d/x/edit" },
+      ],
+    });
+    expect(body).toContain("Also assigned (not auto-tracked)");
+    expect(body).toContain("Big O Together Quiz");
+    expect(body).toContain("docs.google.com");
+  });
+
+  it("keeps them out of the solved count", () => {
+    // The bug: an in-class quiz counted toward the denominator but could
+    // never be marked solved, so the rubric docked a point for it.
+    const body = fillStudyTemplate({
+      problems: [problem()],
+      untracked: [{ title: "Big O Together Quiz", url: "https://example.com/q" }],
+    });
+    expect(body).toContain("Solved this week (1 of 1)");
+    expect(body).toContain("Suggested points");
+  });
+
+  it("omits the section when everything is trackable", () => {
+    const body = fillStudyTemplate({ problems: [problem()], untracked: [] });
+    expect(body).not.toContain("not auto-tracked");
+  });
+});

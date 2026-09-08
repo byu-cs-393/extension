@@ -655,3 +655,11 @@ body {
 .signoff-ta-select:hover {
   border-color: var(--text-tertiary);
 }
+
+/* Assigned but not a LeetCode problem — an in-class quiz, a reading.
+   Listed so a student knows it exists; no checkbox, because nothing can
+   detect whether it was done, and a permanently-unchecked box would read
+   as work outstanding. */
+.untracked-item {
+  color: var(--text-secondary);
+}
