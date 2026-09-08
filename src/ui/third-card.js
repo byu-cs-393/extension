@@ -605,6 +605,12 @@ function renderOnlineAssessment(card, progress, _weekStatus, ctx) {
       stubAction("Online assessment");
       return;
     }
+    // Confirm before starting. An attempt is limited and, on the first
+    // one, timed — the problems only reveal after committing, so a
+    // mis-click spends something a student can't get back. The prompt
+    // doubles as the last chance to read the rules, which otherwise sit
+    // behind the button they're about to press.
+    if (!confirm(startAttemptWarning(attempt, attemptIdx, totalAttempts))) return;
     try {
       await startAttempt({
         netID: ctx.netID,
@@ -619,6 +625,39 @@ function renderOnlineAssessment(card, progress, _weekStatus, ctx) {
   });
   appendResetIfProgress(article, ctx, progress, activeForThisWeek);
   return article;
+}
+
+// What starting this attempt commits the student to, in their own terms.
+// Built from the professor's own rules in course.json rather than the
+// prose description, so it can't drift from what the extension enforces.
+export function startAttemptWarning(attempt, attemptIdx, totalAttempts) {
+  const problems = attempt?.problems?.length ?? 0;
+  const required = attempt?.requiredSolves ?? problems;
+  const lines = [
+    `Start attempt ${attemptIdx + 1} of ${totalAttempts}?`,
+    "",
+    required === problems
+      ? `• Solve all ${problems} problems`
+      : `• Solve ${required} of ${problems} problems`,
+  ];
+  if (Number.isFinite(attempt?.timeLimitMin)) {
+    lines.push(`• ${attempt.timeLimitMin} minute time limit, starting now`);
+  } else {
+    lines.push("• No time limit");
+  }
+  lines.push(
+    attempt?.helpAllowed
+      ? "• You may ask other people for help"
+      : "• No help from people, AI, or solution lookups",
+  );
+  lines.push("");
+  lines.push(
+    attemptIdx + 1 < totalAttempts
+      ? "The problems are revealed once you start. If you don't pass, " +
+        `you can move on to attempt ${attemptIdx + 2}.`
+      : "The problems are revealed once you start. This is the last attempt.",
+  );
+  return lines.join("\n");
 }
 
 // Renders the OA card's title row. Includes an optional timer pill on
