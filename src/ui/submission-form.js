@@ -626,9 +626,12 @@ function ensureStyles() {
       gap: 8px;
       font-size: 13px;
       line-height: 1.4;
-      color: #1f2937;
       cursor: pointer;
       font-weight: 400;
+      /* No colour of its own — the panel sets one and flips it under
+         prefers-color-scheme: dark. Hardcoding #1f2937 here put dark grey
+         text on the dark panel, which read as checkboxes with no labels
+         at all. */
     }
     .cs393-submit-check input {
       margin: 2px 0 0 0;
