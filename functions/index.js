@@ -173,11 +173,23 @@ exports.verifyStudent = onRequest(
     // Identity: the numeric Canvas id the caller read from their own
     // session has to be the one the roster has for this netID.
     //
-    // This is weaker than the lti_user_id check it replaces. That was a
-    // per-user secret a classmate couldn't obtain; a numeric id shows up
-    // in People-page URLs. It is a speed bump, not a wall, and it stands
-    // in until the Canvas token has SIS-read permission — at which point
-    // the stronger check becomes available again.
+    // Be honest about what this is worth: very little. It replaces an
+    // lti_user_id check, which was a per-user secret a classmate had no
+    // way to obtain. A numeric Canvas id is not a secret at all — any
+    // enrolled student can GET /courses/{id}/enrollments and receive
+    // every classmate's user_id in one call. Verified against a real
+    // BYU course.
+    //
+    // So this stops an accident and an idle attempt, not someone who
+    // spends five minutes on it. It is here because everything stronger
+    // is out of reach with a TA token: SIS lookup, reading another
+    // user's lti_user_id, and masquerading on the profile endpoint were
+    // each tested against Canvas and each refused.
+    //
+    // The real fix is OAuth2 with a Canvas developer key, where Canvas
+    // itself tells this function who the caller is. Until then, treat
+    // "which student is this" as asserted rather than proven, and don't
+    // build anything on it that assumes otherwise.
     if (Number(person.id) !== claimedUserId) {
       console.warn(
         `[verifyStudent] ${netID} claimed Canvas id ${claimedUserId}, roster says ${person.id}`,
