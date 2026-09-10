@@ -11,7 +11,7 @@
 // (domain-restricted IAM, separate deployment, etc.) is a follow-up.
 //
 // Expected request shape (POST, application/json):
-//   { "netID": "jdoe7", "canvasUserId": 12345 }
+//   { "netID": "jdoe7", "connectCode": "7F3K-92QR" }
 //
 // Successful response:
 //   { "token": "<Firebase custom token>" }
@@ -43,6 +43,11 @@ const CANVAS_BASE = "https://byu.instructure.com";
 // missing, require() throws at cold-start — which is what we want:
 // deploy will fail loudly instead of silently returning 500s at runtime.
 const DEPLOY_MAP = require("./deploy.fall-2026.json");
+const {
+  CODE_LENGTH,
+  normalizeCode,
+  submissionMatchesCode,
+} = require("./connect-code.js");
 
 // netID: starts with a lowercase letter, then up to 15 letters/digits.
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
@@ -102,6 +107,43 @@ function nextPageUrl(linkHeader) {
   return null;
 }
 
+// The assignment students paste their connection code into. Worth 0
+// points; it exists to carry the code, not to be graded.
+const CONNECT_ASSIGNMENT_KEY = "connect-account";
+
+// Read a student's submission to the connect assignment.
+//
+// Uses the course's Canvas token, NOT the student's session and NOT
+// masquerade. That independence is the point: if this read went through
+// anything the student influences, it would prove nothing.
+//
+// Returns the submission body, or null if they haven't submitted.
+async function fetchConnectSubmission(canvasUserId, token) {
+  const assignmentId = DEPLOY_MAP.assignments?.[CONNECT_ASSIGNMENT_KEY];
+  if (!assignmentId) {
+    // Deploy-map drift, not a student problem. Loud, because every
+    // onboarding fails until it's fixed.
+    throw new Error(
+      `deploy map has no "${CONNECT_ASSIGNMENT_KEY}" assignment — ` +
+        "create it in Canvas and re-run canvas_sync",
+    );
+  }
+  const url =
+    `${CANVAS_BASE}/api/v1/courses/${CS_393_COURSE_ID}` +
+    `/assignments/${assignmentId}/submissions/${canvasUserId}`;
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (resp.status === 404) return null;
+  if (!resp.ok) {
+    throw new Error(`Canvas submission read ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  }
+  const submission = await resp.json();
+  // Canvas returns a submission record even for students who haven't
+  // submitted; body is null in that case.
+  return typeof submission?.body === "string" ? submission.body : null;
+}
+
 // Returns true if the given Canvas user has a TA or Teacher enrollment
 // in the given course. Any failure (network, permissions, unexpected
 // response shape) returns false — we never want to fail a student
@@ -139,18 +181,14 @@ exports.verifyStudent = onRequest(
       return;
     }
 
-    const { netID, canvasUserId } = req.body ?? {};
+    const { netID, connectCode } = req.body ?? {};
 
     if (typeof netID !== "string" || !NETID_REGEX.test(netID)) {
       res.status(400).json({ error: "Invalid netID.", code: "invalid-argument" });
       return;
     }
-    // The client reads this from its own Canvas session. Coerced rather
-    // than type-checked because Canvas is inconsistent about whether ids
-    // come back as numbers or strings.
-    const claimedUserId = Number(canvasUserId);
-    if (!Number.isInteger(claimedUserId) || claimedUserId <= 0) {
-      res.status(400).json({ error: "Invalid canvasUserId.", code: "invalid-argument" });
+    if (normalizeCode(connectCode).length !== CODE_LENGTH) {
+      res.status(400).json({ error: "Invalid connection code.", code: "invalid-argument" });
       return;
     }
 
@@ -170,33 +208,35 @@ exports.verifyStudent = onRequest(
       return;
     }
 
-    // Identity: the numeric Canvas id the caller read from their own
-    // session has to be the one the roster has for this netID.
+    // Identity: the connection code has to be sitting in this student's
+    // own Canvas submission.
     //
-    // Be honest about what this is worth: very little. It replaces an
-    // lti_user_id check, which was a per-user secret a classmate had no
-    // way to obtain. A numeric Canvas id is not a secret at all — any
-    // enrolled student can GET /courses/{id}/enrollments and receive
-    // every classmate's user_id in one call. Verified against a real
-    // BYU course.
-    //
-    // So this stops an accident and an idle attempt, not someone who
-    // spends five minutes on it. It is here because everything stronger
-    // is out of reach with a TA token: SIS lookup, reading another
-    // user's lti_user_id, and masquerading on the profile endpoint were
-    // each tested against Canvas and each refused.
-    //
-    // The real fix is OAuth2 with a Canvas developer key, where Canvas
-    // itself tells this function who the caller is. Until then, treat
-    // "which student is this" as asserted rather than proven, and don't
-    // build anything on it that assumes otherwise.
-    if (Number(person.id) !== claimedUserId) {
-      console.warn(
-        `[verifyStudent] ${netID} claimed Canvas id ${claimedUserId}, roster says ${person.id}`,
-      );
+    // Everything above proves enrollment. This proves possession of the
+    // account, and it's the only step that does. A classmate can list
+    // the roster and learn any netID, but submissions are readable only
+    // by their author and by graders — so they cannot discover somebody
+    // else's code, and without it they cannot claim to be them.
+    let submissionBody;
+    try {
+      submissionBody = await fetchConnectSubmission(person.id, canvasToken.value());
+    } catch (err) {
+      console.error(`[verifyStudent] connect submission read failed for ${netID}:`, err);
+      res.status(500).json({ error: "Canvas lookup failed.", code: "internal" });
+      return;
+    }
+    if (submissionBody === null) {
+      console.warn(`[verifyStudent] ${netID} has not submitted a connection code`);
+      res.status(409).json({
+        error: "No connection code submitted yet.",
+        code: "code-not-submitted",
+      });
+      return;
+    }
+    if (!submissionMatchesCode(submissionBody, connectCode)) {
+      console.warn(`[verifyStudent] ${netID} submitted a code that does not match`);
       res.status(403).json({
-        error: "Canvas identity does not match the netID.",
-        code: "permission-denied",
+        error: "The submitted code does not match.",
+        code: "code-mismatch",
       });
       return;
     }
@@ -218,7 +258,11 @@ exports.verifyStudent = onRequest(
 
     const additionalClaims = isTa ? { role: "ta" } : undefined;
     const customToken = await getAuth().createCustomToken(netID, additionalClaims);
-    res.status(200).json({ token: customToken });
+    // canvasUserId comes back because auto-submit needs it to masquerade
+    // when a TA signs a student off, and the client no longer has any way
+    // to learn it — there's no Canvas content script any more. The roster
+    // lookup already resolved it, so it costs nothing to return.
+    res.status(200).json({ token: customToken, canvasUserId: person.id });
   }
 );
 

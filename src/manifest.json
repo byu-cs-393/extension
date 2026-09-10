@@ -30,7 +30,6 @@
   "host_permissions": [
     "https://firestore.googleapis.com/*",
     "https://leetcode.com/*",
-    "https://byu.instructure.com/*",
     "https://identitytoolkit.googleapis.com/*",
     "https://securetoken.googleapis.com/*",
     "https://cs393-496021.web.app/*"
@@ -60,15 +59,6 @@
       ],
       "js": [
         "generated/keystroke-tracker.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://byu.instructure.com/*"
-      ],
-      "js": [
-        "generated/canvas-auth.js"
       ],
       "run_at": "document_idle"
     }

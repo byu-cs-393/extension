@@ -1,15 +1,21 @@
 import { fetchStudent, updateStudent } from "../platform/firestore.js";
 import { signIn, VerifyStudentError } from "../platform/auth.js";
+import {
+  generateConnectCode,
+  formatConnectCode,
+  normalizeConnectCode,
+} from "../data/connect-code.js";
 
 // Three-step wizard:
 //   Step 0 — Welcome: what the extension does and what data it uses.
 //            Shown once; skipped for anyone who's already got a netID
 //            on file. A "Get started" click advances to Step 1.
-//   Step 1 — Canvas identity: requires an active BYU Canvas session.
-//            netID + lti_user_id come from Canvas; the student fills in
-//            display name. verifyStudent
-//            server-side re-verifies the (netID, lti_user_id) pair
-//            against Canvas using the instructor's Canvas API token.
+//   Step 1 — Canvas identity: the student types their netID and pastes a
+//            generated code into the "Connect Your Account" assignment in
+//            Canvas. verifyStudent checks the netID is on the roster and
+//            that the code is in that student's own submission, read with
+//            the course's Canvas token. Nothing runs on Canvas pages —
+//            the extension has no content script there.
 //   Step 2 — LeetCode link: detect via leetcode-auth content script,
 //            confirm identity, save linked username.
 
@@ -19,13 +25,11 @@ const step0Panel = document.querySelector('.step-panel[data-step="0"]');
 const welcomeContinueBtn = document.getElementById("welcome-continue-btn");
 
 const step1Panel = document.querySelector('.step-panel[data-step="1"]');
-const canvasSignedOutBlock = document.getElementById("canvas-signed-out");
-const canvasSignedInBlock = document.getElementById("canvas-signed-in");
-const openCanvasBtn = document.getElementById("open-canvas-btn");
-const canvasRecheckBtn = document.getElementById("canvas-recheck-btn");
-const canvasSwitchBtn = document.getElementById("canvas-switch-btn");
-const canvasCardNetid = document.getElementById("canvas-card-netid");
-const canvasCardName = document.getElementById("canvas-card-name");
+const connectCodeEl = document.getElementById("connect-code");
+const copyCodeBtn = document.getElementById("copy-code-btn");
+const openAssignmentBtn = document.getElementById("open-assignment-btn");
+const newCodeBtn = document.getElementById("new-code-btn");
+const netidInput = document.getElementById("input-netid");
 const step1Form = document.getElementById("step1-form");
 const step1SubmitBtn = document.getElementById("step1-submit-btn");
 const nameInput = document.getElementById("input-name");
@@ -68,46 +72,58 @@ function showStep(n) {
   });
 }
 
-// ---- Step 1: Canvas state rendering ------------------------------------
+// ---- Step 1: connection code -------------------------------------------
+//
+// The extension no longer reads anything from Canvas. It shows a code,
+// the student pastes it into a Canvas assignment from their own login,
+// and the Cloud Function reads it back with the course's token. See
+// functions/connect-code.js for why that's the proof and the earlier
+// approaches weren't.
 
-// Module-scoped Canvas state — the form needs to read this when submitting.
-let currentCanvasAuth = null;
+const CONNECT_ASSIGNMENT_URL =
+  "https://byu.instructure.com/courses/35464/assignments";
 
-function renderCanvasState(auth) {
-  currentCanvasAuth = auth;
-  const signedIn =
-    !!auth?.signedIn &&
-    typeof auth.netID === "string" &&
-    NETID_REGEX.test(auth.netID) &&
-    // canvasUserId, not ltiUserId — it's what verification needs now,
-    // and gating on a value we no longer send would refuse to show the
-    // "signed in" card to a student who is perfectly able to onboard.
-    !!auth.canvasUserId;
+// Held in storage.local, not just memory: a student opens Canvas in
+// another tab, pastes, and comes back — possibly after this page has
+// been reloaded. Regenerating the code in between would strand the one
+// they already submitted.
+let currentCode = null;
 
-  canvasSignedOutBlock.hidden = signedIn;
-  canvasSignedInBlock.hidden = !signedIn;
-  if (signedIn) {
-    canvasCardNetid.textContent = auth.netID;
-    canvasCardName.textContent = auth.name || "";
+async function loadOrCreateCode() {
+  const { connectCode } = await chrome.storage.local.get("connectCode");
+  if (typeof connectCode === "string" && normalizeConnectCode(connectCode).length === 8) {
+    currentCode = connectCode;
+  } else {
+    currentCode = generateConnectCode();
+    await chrome.storage.local.set({ connectCode: currentCode });
   }
+  renderCode();
 }
 
-// Pre-fill display name from any existing student doc, but
-// only when we know the netID (i.e., once Canvas detection has landed).
+function renderCode() {
+  connectCodeEl.textContent = formatConnectCode(currentCode ?? "");
+}
+
+async function regenerateCode() {
+  currentCode = generateConnectCode();
+  await chrome.storage.local.set({ connectCode: currentCode });
+  renderCode();
+  setStatusWorking(
+    step1Status,
+    "New code generated — submit this one to Canvas instead.",
+  );
+}
+
+// Pre-fill the display name from an existing student doc, once the
+// student has typed a netID that looks real.
 let lastPrefilledForNetID = null;
 async function maybePrefillProfile(netID) {
   if (!netID || netID === lastPrefilledForNetID) return;
   lastPrefilledForNetID = netID;
   try {
     const student = await fetchStudent(netID);
-    if (student) {
-      if (!nameInput.value.trim() && typeof student.name === "string") {
-        nameInput.value = student.name;
-      } else if (!nameInput.value.trim() && currentCanvasAuth?.name) {
-        nameInput.value = currentCanvasAuth.name;
-      }
-    } else if (currentCanvasAuth?.name && !nameInput.value.trim()) {
-      nameInput.value = currentCanvasAuth.name;
+    if (student && !nameInput.value.trim() && typeof student.name === "string") {
+      nameInput.value = student.name;
     }
   } catch (error) {
     console.error("Failed to fetch existing student:", error);
@@ -158,14 +174,29 @@ function friendlyVerifyError(error) {
   switch (code) {
     case "not-found":
       return (
-        "You don't appear to be enrolled in CS 393 in Canvas. " +
-        "If you just enrolled, wait a few hours for Canvas to sync. " +
-        "Otherwise, contact your instructor."
+        "That netID isn't on the CS 393 roster in Canvas. Check the " +
+        "spelling — it's the name you sign in to Canvas with, like " +
+        "jack684. If you just enrolled, Canvas can take a few hours to " +
+        "sync."
+      );
+    // The two states a student is most likely to land in, so both say
+    // exactly what to do rather than describing what went wrong.
+    case "code-not-submitted":
+      return (
+        "We don't see a submission yet. Open the Connect Your Account " +
+        "assignment in Canvas, paste your code as the submission, and " +
+        "submit it — then click Verify again."
+      );
+    case "code-mismatch":
+      return (
+        "The code in your Canvas submission doesn't match the one above. " +
+        "Submit this exact code to the assignment, then click Verify " +
+        "again. Resubmitting replaces your earlier attempt."
       );
     case "permission-denied":
       return (
-        "The BYU Canvas account you're signed in with doesn't match this session. " +
-        "Sign out of Canvas and sign in with your own BYU account, then try again."
+        "We couldn't confirm that Canvas account is yours. Make sure you " +
+        "submitted the code while signed in to Canvas as yourself."
       );
     case "invalid-argument":
       return (
@@ -217,28 +248,15 @@ function friendlyVerifyError(error) {
 // Hydrate Canvas + LeetCode state from local storage, then keep both
 // live via onChanged.
 (async () => {
-  const { leetcodeAuth, canvasAuth } = await chrome.storage.local.get([
-    "leetcodeAuth",
-    "canvasAuth",
-  ]);
+  const { leetcodeAuth } = await chrome.storage.local.get("leetcodeAuth");
   renderLeetcodeState(leetcodeAuth);
-  renderCanvasState(canvasAuth);
-  if (canvasAuth?.signedIn && canvasAuth.netID) {
-    await maybePrefillProfile(canvasAuth.netID);
-  }
+  await loadOrCreateCode();
 })();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   if (changes.leetcodeAuth) {
     renderLeetcodeState(changes.leetcodeAuth.newValue);
-  }
-  if (changes.canvasAuth) {
-    const next = changes.canvasAuth.newValue;
-    renderCanvasState(next);
-    if (next?.signedIn && next.netID) {
-      maybePrefillProfile(next.netID);
-    }
   }
 });
 
@@ -248,78 +266,51 @@ welcomeContinueBtn.addEventListener("click", () => {
   showStep(1);
 });
 
-// ---- Step 1: Canvas-state buttons --------------------------------------
+// ---- Step 1: connection-code buttons -----------------------------------
 
-openCanvasBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: "https://byu.instructure.com/", active: true });
+openAssignmentBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: CONNECT_ASSIGNMENT_URL, active: true });
 });
 
-// Re-check: focus the existing Canvas tab (if any) instead of reloading
-// it — reloading destroys any in-progress work the student might have
-// on that page. The content script already writes to storage on each
-// page load, so as long as the student navigates or reloads Canvas
-// themselves after signing in, storage.onChanged will fire and update
-// the UI here.
-canvasRecheckBtn.addEventListener("click", async () => {
-  const tabs = await chrome.tabs.query({ url: "https://byu.instructure.com/*" });
-  if (tabs.length === 0) {
-    chrome.tabs.create({ url: "https://byu.instructure.com/", active: true });
-    return;
+copyCodeBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(formatConnectCode(currentCode ?? ""));
+    setStatusSuccess(step1Status, "Code copied. Paste it into the Canvas assignment.");
+  } catch {
+    // Clipboard access can be refused; the code is on screen regardless.
+    setStatusWorking(step1Status, "Couldn't copy — select the code above and copy it.");
   }
-  const tab = tabs[0];
-  await chrome.tabs.update(tab.id, { active: true });
-  if (typeof tab.windowId === "number") {
-    await chrome.windows.update(tab.windowId, { focused: true });
-  }
-  setStatusWorking(step1Status, "Re-checking Canvas…");
-  // The content script won't re-fire without a page event; give the
-  // student a moment to reload/navigate, then clear the status so it
-  // doesn't look stuck if nothing lands.
-  setTimeout(() => {
-    if (step1Status.classList.contains("working")) clearStatus(step1Status);
-  }, 5000);
 });
 
-canvasSwitchBtn.addEventListener("click", () => {
-  // Open Canvas — student signs out and back in there. Our content
-  // script picks up the new session and the card updates automatically.
-  chrome.tabs.create({ url: "https://byu.instructure.com/logout", active: true });
-});
+newCodeBtn.addEventListener("click", regenerateCode);
 
 // ---- Step 1 submit -----------------------------------------------------
 
 step1Form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  // Gate on Canvas state — UI hides the form when not signed in, but
-  // defend against race conditions where the form is visible briefly.
-  if (
-    !currentCanvasAuth?.signedIn ||
-    !NETID_REGEX.test(currentCanvasAuth.netID ?? "") ||
-    !currentCanvasAuth.canvasUserId
-  ) {
-    setStatusError(
-      step1Status,
-      "Canvas session not detected. Sign in to Canvas first, then try again."
-    );
+  const netID = netidInput.value.trim().toLowerCase();
+  if (!NETID_REGEX.test(netID)) {
+    setStatusError(step1Status, "That doesn't look like a BYU netID. Example: jack684");
     return;
   }
-
-  const netID = currentCanvasAuth.netID;
-  const ltiUserId = currentCanvasAuth.ltiUserId;
-  const canvasUserId = currentCanvasAuth.canvasUserId ?? null;
+  if (!currentCode) {
+    setStatusError(step1Status, "No connection code yet — reload this page.");
+    return;
+  }
   const name = nameInput.value.trim();
 
   step1SubmitBtn.disabled = true;
-  setStatusWorking(step1Status, "Verifying with BYU…");
+  setStatusWorking(step1Status, "Checking your Canvas submission…");
+  let canvasUserId = null;
   try {
-    // signIn() runs verifyStudent → signInWithCustomToken → caches
-    // the Firebase ID token. Errors from verifyStudent come back as
-    // VerifyStudentError with a `.code` we can map to friendly copy.
-    await signIn(netID, canvasUserId);
+    // signIn() runs verifyStudent → signInWithCustomToken → caches the
+    // Firebase ID token. verifyStudent reads the student's Canvas
+    // submission with the course token and checks the code is in it.
+    ({ canvasUserId } = await signIn(netID, currentCode));
 
     setStatusWorking(step1Status, "Saving…");
-    await chrome.storage.sync.set({ netID, ltiUserId, canvasUserId });
+    await chrome.storage.sync.set({ netID, canvasUserId });
 
     const fields = {};
     if (name) fields.name = name;

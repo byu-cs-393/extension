@@ -18,12 +18,17 @@
 //   5. Tokens are JWTs valid for ~1 hour. getIdToken() transparently
 //      refreshes (~5 min before expiry) using the refresh token.
 //
-// Note: the security here comes from the lti_user_id check — only the
-// real student's Canvas session can see their own lti_user_id. We
-// don't need user-side OAuth because the verification happens
-// server-side via the instructor token. (BYU students use Microsoft
-// for email, not Google, which made a Google-OAuth gate unworkable
-// anyway.)
+// Note: the security comes from the connection code. The student pastes
+// it into a Canvas assignment while signed in as themselves, and
+// verifyStudent reads it back with the course's Canvas token — an
+// independent observation of something only that student could cause.
+// Nothing the extension reports is treated as evidence, because the
+// extension runs on the student's machine and can be edited or bypassed
+// entirely.
+//
+// This is a homemade version of what OAuth2 does properly; the code is
+// the nonce, delivered by hand instead of by Canvas. Swap it out if the
+// course ever gets a Canvas developer key.
 
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -48,18 +53,18 @@ export class VerifyStudentError extends Error {
   constructor({ code, status, serverMessage }) {
     super(serverMessage || code || `verifyStudent HTTP ${status}`);
     this.name = "VerifyStudentError";
-    this.code = code || null; // "not-found" | "permission-denied" | "internal" | "invalid-argument" | "method-not-allowed" | null
+    this.code = code || null; // "not-found" | "code-not-submitted" | "code-mismatch" | "permission-denied" | "internal" | "invalid-argument" | "method-not-allowed" | null
     this.status = status; // HTTP status number
   }
 }
 
-async function callVerifyStudent(netID, canvasUserId) {
+async function callVerifyStudent(netID, connectCode) {
   let response;
   try {
     response = await fetch(VERIFY_STUDENT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ netID, canvasUserId }),
+      body: JSON.stringify({ netID, connectCode }),
     });
   } catch (networkError) {
     // fetch() throws for network-level failures (offline, DNS, etc.).
@@ -100,7 +105,7 @@ async function callVerifyStudent(netID, canvasUserId) {
       serverMessage: "verifyStudent returned no token.",
     });
   }
-  return data.token;
+  return { token: data.token, canvasUserId: data.canvasUserId ?? null };
 }
 
 // ---- Exchange custom token for Firebase ID token -----------------------
@@ -160,16 +165,21 @@ async function storeTokens({ idToken, refreshToken, expiresIn }) {
 // Run the full sign-in chain. Called by onboarding once we know netID +
 // canvasUserId from Canvas.
 //
-// canvasUserId, not ltiUserId: verifying a netID used to mean resolving
-// it against Canvas's SIS data, which the course's TA token has no
-// permission to do. The server now looks the netID up on the course
-// roster and matches this id against it. See findEnrolledUser in
-// functions/index.js.
-export async function signIn(netID, canvasUserId) {
-  const customToken = await callVerifyStudent(netID, canvasUserId);
-  const bundle = await signInWithCustomToken(customToken);
+// Takes a connection code, not an identifier read from Canvas. The
+// extension can't prove identity by reporting what it saw — a student
+// can edit it, or skip it and call the function directly. Instead the
+// student pastes this code into a Canvas assignment from their own
+// login, and the function reads it back with the course's token. See
+// functions/connect-code.js.
+//
+// Returns { idToken, canvasUserId }: the server resolves canvasUserId
+// from the roster, and the caller needs it for the student's Firestore
+// doc so auto-submit can masquerade later.
+export async function signIn(netID, connectCode) {
+  const { token, canvasUserId } = await callVerifyStudent(netID, connectCode);
+  const bundle = await signInWithCustomToken(token);
   await storeTokens(bundle);
-  return bundle.idToken;
+  return { idToken: bundle.idToken, canvasUserId: canvasUserId ?? null };
 }
 
 // Returns a fresh Firebase ID token, refreshing if near expiry. Returns

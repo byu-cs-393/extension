@@ -42,7 +42,6 @@ export const CONTENT_SCRIPTS = [
   "keystroke-injector",
   "leetcode-tracker",
   "leetcode-auth",
-  "canvas-auth",
 ];
 
 const BANNER = `// GENERATED FILE — DO NOT EDIT.

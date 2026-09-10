@@ -93,51 +93,57 @@
         </button>
       </section>
 
-      <!-- Step 1: Canvas identity -->
+      <!-- Step 1: Canvas identity, proved by a code the student pastes
+           into a Canvas assignment. The extension no longer runs any code
+           on Canvas pages — see functions/connect-code.js for why. -->
       <section class="step-panel" data-step="1" hidden>
-        <h1>Sign in to Canvas</h1>
+        <h1>Connect your Canvas account</h1>
         <p class="lede">
-          We use your BYU Canvas session to verify you're enrolled in CS 393 — no typing required.
+          Paste this code into the <strong>Connect Your Account</strong> assignment in
+          Canvas. Submitting it from your own Canvas login is how we know the account
+          is yours.
         </p>
 
-        <!-- Canvas signed out: prompt the student to sign in. -->
-        <div id="canvas-signed-out" class="canvas-state">
-          <button type="button" class="btn-primary" id="open-canvas-btn">
-            Open BYU Canvas →
-          </button>
-          <p class="hint">
-            Already signed in?
-            <button type="button" class="btn-link inline" id="canvas-recheck-btn">
-              Re-check session
-            </button>
-          </p>
+        <div class="connect-code-card">
+          <div class="connect-code-label">Your connection code</div>
+          <div class="connect-code" id="connect-code">••••-••••</div>
+          <button type="button" class="btn-link inline" id="copy-code-btn">Copy code</button>
         </div>
 
-        <!-- Canvas signed in: show identity card + display-name form. -->
-        <div id="canvas-signed-in" class="canvas-state" hidden>
-          <div class="canvas-card">
-            <div class="canvas-card-label">Signed in to Canvas as</div>
-            <div class="canvas-card-netid" id="canvas-card-netid">…</div>
-            <div class="canvas-card-realname" id="canvas-card-name"></div>
+        <ol class="connect-steps">
+          <li>
+            <button type="button" class="btn-primary" id="open-assignment-btn">
+              Open the assignment in Canvas →
+            </button>
+          </li>
+          <li>Paste the code as your submission and submit it.</li>
+          <li>Come back here and click Verify.</li>
+        </ol>
+
+        <form id="step1-form" class="onboard-form">
+          <div class="field">
+            <label for="input-netid">
+              Your BYU netID
+              <span class="hint">the one you sign in to Canvas with</span>
+            </label>
+            <input type="text" id="input-netid" autocomplete="username"
+                   spellcheck="false" placeholder="e.g. jack684" />
+          </div>
+          <div class="field">
+            <label for="input-name">
+              Display name
+              <span class="hint">how the dashboard greets you</span>
+            </label>
+            <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
           </div>
 
-          <form id="step1-form" class="onboard-form">
-            <div class="field">
-              <label for="input-name">
-                Display name
-                <span class="hint">how the dashboard greets you</span>
-              </label>
-              <input type="text" id="input-name" autocomplete="off" placeholder="e.g. Jack" />
-            </div>
+          <button type="submit" class="btn-primary" id="step1-submit-btn">Verify →</button>
+          <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
+        </form>
 
-            <button type="submit" class="btn-primary" id="step1-submit-btn">Continue →</button>
-            <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
-          </form>
-
-          <button type="button" class="btn-link" id="canvas-switch-btn">
-            Sign in to Canvas with a different account
-          </button>
-        </div>
+        <button type="button" class="btn-link" id="new-code-btn">
+          Generate a new code
+        </button>
       </section>
 
       <!-- Step 2: LeetCode -->
