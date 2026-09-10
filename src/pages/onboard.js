@@ -79,7 +79,10 @@ function renderCanvasState(auth) {
     !!auth?.signedIn &&
     typeof auth.netID === "string" &&
     NETID_REGEX.test(auth.netID) &&
-    !!auth.ltiUserId;
+    // canvasUserId, not ltiUserId — it's what verification needs now,
+    // and gating on a value we no longer send would refuse to show the
+    // "signed in" card to a student who is perfectly able to onboard.
+    !!auth.canvasUserId;
 
   canvasSignedOutBlock.hidden = signedIn;
   canvasSignedInBlock.hidden = !signedIn;
@@ -293,7 +296,7 @@ step1Form.addEventListener("submit", async (event) => {
   if (
     !currentCanvasAuth?.signedIn ||
     !NETID_REGEX.test(currentCanvasAuth.netID ?? "") ||
-    !currentCanvasAuth.ltiUserId
+    !currentCanvasAuth.canvasUserId
   ) {
     setStatusError(
       step1Status,
@@ -313,7 +316,7 @@ step1Form.addEventListener("submit", async (event) => {
     // signIn() runs verifyStudent → signInWithCustomToken → caches
     // the Firebase ID token. Errors from verifyStudent come back as
     // VerifyStudentError with a `.code` we can map to friendly copy.
-    await signIn(netID, ltiUserId);
+    await signIn(netID, canvasUserId);
 
     setStatusWorking(step1Status, "Saving…");
     await chrome.storage.sync.set({ netID, ltiUserId, canvasUserId });

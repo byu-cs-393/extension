@@ -1,12 +1,12 @@
 // Firebase Auth wiring for the extension.
 //
 // Phase 2 auth chain:
-//   1. Extension POSTs (netID, ltiUserId) — captured from the student's
+//   1. Extension POSTs (netID, canvasUserId) — captured from the student's
 //      own Canvas session — to our verifyStudent endpoint via Firebase
 //      Hosting (publicly callable; Hosting authenticates to Cloud Run
 //      on our behalf via its service account, sidestepping the org
 //      policy that blocks public Cloud Run invocations).
-//   2. The Cloud Function independently verifies the (netID, ltiUserId)
+//   2. The Cloud Function independently verifies the (netID, canvasUserId)
 //      against Canvas using the instructor's API token. On match it
 //      mints a Firebase custom token whose uid is the netID.
 //   3. Exchange the custom token for a Firebase ID token via Firebase
@@ -53,13 +53,13 @@ export class VerifyStudentError extends Error {
   }
 }
 
-async function callVerifyStudent(netID, ltiUserId) {
+async function callVerifyStudent(netID, canvasUserId) {
   let response;
   try {
     response = await fetch(VERIFY_STUDENT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ netID, ltiUserId }),
+      body: JSON.stringify({ netID, canvasUserId }),
     });
   } catch (networkError) {
     // fetch() throws for network-level failures (offline, DNS, etc.).
@@ -158,9 +158,15 @@ async function storeTokens({ idToken, refreshToken, expiresIn }) {
 // ---- Public API --------------------------------------------------------
 
 // Run the full sign-in chain. Called by onboarding once we know netID +
-// ltiUserId from Canvas.
-export async function signIn(netID, ltiUserId) {
-  const customToken = await callVerifyStudent(netID, ltiUserId);
+// canvasUserId from Canvas.
+//
+// canvasUserId, not ltiUserId: verifying a netID used to mean resolving
+// it against Canvas's SIS data, which the course's TA token has no
+// permission to do. The server now looks the netID up on the course
+// roster and matches this id against it. See findEnrolledUser in
+// functions/index.js.
+export async function signIn(netID, canvasUserId) {
+  const customToken = await callVerifyStudent(netID, canvasUserId);
   const bundle = await signInWithCustomToken(customToken);
   await storeTokens(bundle);
   return bundle.idToken;

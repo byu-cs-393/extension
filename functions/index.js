@@ -11,7 +11,7 @@
 // (domain-restricted IAM, separate deployment, etc.) is a follow-up.
 //
 // Expected request shape (POST, application/json):
-//   { "netID": "jdoe7", "ltiUserId": "<40-char hex>" }
+//   { "netID": "jdoe7", "canvasUserId": 12345 }
 //
 // Successful response:
 //   { "token": "<Firebase custom token>" }
@@ -46,34 +46,60 @@ const DEPLOY_MAP = require("./deploy.fall-2026.json");
 
 // netID: starts with a lowercase letter, then up to 15 letters/digits.
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
-// lti_user_id is a 40-char hex (SHA-1) hash.
-const LTI_USER_ID_REGEX = /^[a-f0-9]{40}$/;
 
-// Two-step Canvas lookup: resolve the netID to a Canvas internal user
-// ID, then fetch that user's full profile (which includes lti_user_id
-// when the calling token has sufficient permission).
-async function fetchCanvasProfile(netID, token) {
+// Find a person on THIS COURSE'S roster by netID.
+//
+// The obvious way to do this is GET /users/sis_login_id:{netID}, and
+// that's what this used to do. It doesn't work. Addressing a user by
+// their school login is a lookup against Canvas's SIS data, which needs
+// account-level SIS-read permission — a TA token doesn't have it, and
+// Canvas answers 404 rather than 403 so as not to reveal whether the
+// account exists. The one netID a TA token CAN resolve that way is its
+// own owner's, which is exactly why this bug reached students: it
+// worked perfectly for the TA testing it and failed for everyone else.
+//
+// Listing your own course's roster needs no special permission, so ask
+// that question instead. It's also the question we actually meant:
+// "is this person in CS 393", not "does this netID exist at BYU".
+//
+// Returns the Canvas user object, or null if they aren't enrolled.
+async function findEnrolledUser(netID, courseId, token) {
   const auth = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  // Staff onboard through the same flow, so the roster query has to
+  // include them — filtering to students alone would lock out every TA.
+  let url =
+    `${CANVAS_BASE}/api/v1/courses/${courseId}/users` +
+    `?enrollment_type[]=student&enrollment_type[]=ta&enrollment_type[]=teacher` +
+    `&per_page=100`;
 
-  const lookupResp = await fetch(`${CANVAS_BASE}/api/v1/users/sis_login_id:${netID}`, {
-    headers: auth,
-  });
-  if (lookupResp.status === 404) return null;
-  if (!lookupResp.ok) {
-    const body = await lookupResp.text();
-    throw new Error(`Canvas user lookup ${lookupResp.status}: ${body}`);
-  }
-  const user = await lookupResp.json();
-  if (!user?.id) return null;
+  while (url) {
+    const resp = await fetch(url, { headers: auth });
+    if (!resp.ok) {
+      throw new Error(`Canvas roster ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    }
+    const users = await resp.json();
+    if (!Array.isArray(users)) throw new Error("Canvas roster: unexpected response shape");
 
-  const profileResp = await fetch(`${CANVAS_BASE}/api/v1/users/${user.id}/profile`, {
-    headers: auth,
-  });
-  if (!profileResp.ok) {
-    const body = await profileResp.text();
-    throw new Error(`Canvas profile fetch ${profileResp.status}: ${body}`);
+    const hit = users.find(
+      (u) => String(u?.login_id ?? "").toLowerCase() === netID.toLowerCase(),
+    );
+    if (hit) return hit;
+
+    url = nextPageUrl(resp.headers.get("link"));
   }
-  return profileResp.json();
+  return null;
+}
+
+// Canvas paginates with an RFC 5988 Link header. Without following it a
+// roster read silently stops at 100 people, and student 101 gets told
+// they aren't enrolled.
+function nextPageUrl(linkHeader) {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(",")) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 // Returns true if the given Canvas user has a TA or Teacher enrollment
@@ -113,33 +139,51 @@ exports.verifyStudent = onRequest(
       return;
     }
 
-    const { netID, ltiUserId } = req.body ?? {};
+    const { netID, canvasUserId } = req.body ?? {};
 
     if (typeof netID !== "string" || !NETID_REGEX.test(netID)) {
       res.status(400).json({ error: "Invalid netID.", code: "invalid-argument" });
       return;
     }
-    if (typeof ltiUserId !== "string" || !LTI_USER_ID_REGEX.test(ltiUserId)) {
-      res.status(400).json({ error: "Invalid lti_user_id.", code: "invalid-argument" });
+    // The client reads this from its own Canvas session. Coerced rather
+    // than type-checked because Canvas is inconsistent about whether ids
+    // come back as numbers or strings.
+    const claimedUserId = Number(canvasUserId);
+    if (!Number.isInteger(claimedUserId) || claimedUserId <= 0) {
+      res.status(400).json({ error: "Invalid canvasUserId.", code: "invalid-argument" });
       return;
     }
 
-    let profile;
+    let person;
     try {
-      profile = await fetchCanvasProfile(netID, canvasToken.value());
+      person = await findEnrolledUser(netID, CS_393_COURSE_ID, canvasToken.value());
     } catch (err) {
-      console.error("Canvas lookup failed:", err);
+      console.error(`[verifyStudent] roster lookup failed for ${netID}:`, err);
       res.status(500).json({ error: "Canvas lookup failed.", code: "internal" });
       return;
     }
-    if (!profile) {
-      res.status(404).json({ error: "netID not found in Canvas.", code: "not-found" });
+    if (!person) {
+      // Logged, unlike the old 404 path — a silent not-found is why this
+      // took a student report to notice.
+      console.warn(`[verifyStudent] ${netID} is not on the CS 393 roster`);
+      res.status(404).json({ error: "netID is not enrolled in CS 393.", code: "not-found" });
       return;
     }
 
-    if (typeof profile.lti_user_id !== "string" || profile.lti_user_id !== ltiUserId) {
+    // Identity: the numeric Canvas id the caller read from their own
+    // session has to be the one the roster has for this netID.
+    //
+    // This is weaker than the lti_user_id check it replaces. That was a
+    // per-user secret a classmate couldn't obtain; a numeric id shows up
+    // in People-page URLs. It is a speed bump, not a wall, and it stands
+    // in until the Canvas token has SIS-read permission — at which point
+    // the stronger check becomes available again.
+    if (Number(person.id) !== claimedUserId) {
+      console.warn(
+        `[verifyStudent] ${netID} claimed Canvas id ${claimedUserId}, roster says ${person.id}`,
+      );
       res.status(403).json({
-        error: "Canvas lti_user_id does not match the netID.",
+        error: "Canvas identity does not match the netID.",
         code: "permission-denied",
       });
       return;
@@ -155,7 +199,7 @@ exports.verifyStudent = onRequest(
     // student sign-in to fail because the TA lookup had a network
     // hiccup. Non-TAs get the same token they always got.
     const isTa = await isCourseTaOrInstructor(
-      profile.id,
+      person.id,
       CS_393_COURSE_ID,
       canvasToken.value()
     );
