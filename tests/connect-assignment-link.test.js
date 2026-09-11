@@ -17,6 +17,17 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 describe("connect assignment link", () => {
   const id = deployMap.assignments?.["connect-account"];
 
+  // Getting the id from Canvas: it is the number BEFORE the "?" in the
+  // assignment URL. Navigating in from a module gives you
+  //
+  //   /courses/35464/assignments/1498932?module_item_id=3273213
+  //                               ^^^^^^^ this one
+  //
+  // The module_item_id is a different object entirely. Using it makes
+  // every submission read 404, which surfaces to students as "no
+  // connection code submitted yet" — and these tests would not catch it.
+  // They assert the three copies AGREE, not that the id is correct.
+  //
   // Without this key, verifyStudent throws on every onboarding.
   it("is in the deploy map", () => {
     expect(typeof id).toBe("number");

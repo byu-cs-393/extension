@@ -88,7 +88,7 @@ function showStep(n) {
 // Cloud Functions, not the extension. A test asserts the two agree, so
 // this can't drift into a dead link unnoticed.
 const CONNECT_ASSIGNMENT_URL =
-  "https://byu.instructure.com/courses/35464/assignments/3273213";
+  "https://byu.instructure.com/courses/35464/assignments/1498932";
 
 // Held in storage.local, not just memory: a student opens Canvas in
 // another tab, pastes, and comes back — possibly after this page has

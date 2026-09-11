@@ -49,7 +49,7 @@ session — so you prove it once, by hand:
    it exists only to carry the code. (If the button doesn't work, the
    assignment is **Connect Your Account (Optional — CS 393 Buddy)**,
    under Milestones:
-   <https://byu.instructure.com/courses/35464/assignments/3273213>)
+   <https://byu.instructure.com/courses/35464/assignments/1498932>)
 3. Come back to the onboarding tab, type your **netID**, and click
    **Verify**
 4. **Sign in to LeetCode** at leetcode.com. Your solved problems sync
