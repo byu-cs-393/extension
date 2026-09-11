@@ -94,10 +94,12 @@ function showStep(n) {
 const CONNECT_ASSIGNMENT_URL =
   "https://byu.instructure.com/courses/35464/assignments/1498932";
 
-// Where staff paste the same code. Unpublished and staff-editable, so
-// students can neither write a code onto it nor read one off it — which
-// is what makes it a valid proof channel. See fetchStaffAccessPage.
-const STAFF_PAGE_URL = "https://byu.instructure.com/courses/35464/pages/ta-access";
+// Where staff paste the same code: an UNPUBLISHED assignment. Staff-only
+// editing stops a student forging a code onto it; unpublished stops them
+// reading one off it. Both are required, and the server re-checks the
+// publish state on every read. See fetchStaffAccessDescription.
+const STAFF_PAGE_URL =
+  "https://byu.instructure.com/courses/35464/assignments/1500010";
 
 // Instructions only. The server picks the channel from the person's
 // Canvas enrolment, so flipping this grants nothing — a student who
@@ -220,9 +222,9 @@ function friendlyVerifyError(error) {
     // assignments, so they prove it on a staff-only page instead.
     case "code-not-on-staff-page":
       return (
-        "We don't see your code on the TA Access page. Open it in Canvas, " +
-        "click Edit, add your code on its own line, and save — then click " +
-        "Verify again."
+        "We don't see your code on the TA Access assignment. Open it in " +
+        "Canvas, click Edit, add your code on its own line in the " +
+        "description, and save — then click Verify again."
       );
     case "code-mismatch":
       return (

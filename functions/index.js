@@ -143,40 +143,57 @@ async function fetchConnectSubmission(canvasUserId, token) {
   return typeof submission?.body === "string" ? submission.body : null;
 }
 
-// The Canvas page staff paste their connection code into.
+// The Canvas assignment staff paste their connection code into.
 //
 // Staff cannot submit to assignments — Canvas hides submission from
-// anyone with a teaching role — so the student proof channel is closed
-// to them. They need a surface only staff can write.
+// teaching roles — so the student proof channel is closed to them. They
+// need a surface only staff can write, and an assignment DESCRIPTION is
+// one: editing an assignment is a staff action, and an UNPUBLISHED
+// assignment is invisible to students.
 //
-// An UNPUBLISHED page with teacher-only editing is that surface, and it
-// gives both properties at once: students can't edit it (staff-only
-// editing) and can't read it (unpublished content is invisible to
-// them). So a student can neither forge a code onto it nor steal one
-// from it.
-const STAFF_PAGE_SLUG = "ta-access";
+// Both halves are required. Staff-only editing stops a student forging a
+// code; unpublished stops them reading someone else's off it. An
+// assignment makes the second half fragile in a way a page doesn't — the
+// publish toggle sits right there in the assignment index, and one
+// accidental click would expose every code with no visible symptom. So
+// the publish state is checked on every read rather than assumed.
+const STAFF_ASSIGNMENT_KEY = "ta-access";
 
-// Returns the page body, or null if the page has no content yet.
-// Throws if the page doesn't exist — that's course setup, not a person's
-// mistake, and every staff sign-in fails until it's fixed.
-async function fetchStaffAccessPage(token) {
-  const url = `${CANVAS_BASE}/api/v1/courses/${CS_393_COURSE_ID}/pages/${STAFF_PAGE_SLUG}`;
+// Returns the assignment description, or null if it's still empty.
+async function fetchStaffAccessDescription(token) {
+  const assignmentId = DEPLOY_MAP.assignments?.[STAFF_ASSIGNMENT_KEY];
+  if (!assignmentId) {
+    throw new Error(
+      `deploy map has no "${STAFF_ASSIGNMENT_KEY}" assignment — create it in ` +
+        "Canvas, leave it UNPUBLISHED, and record its id",
+    );
+  }
+  const url = `${CANVAS_BASE}/api/v1/courses/${CS_393_COURSE_ID}/assignments/${assignmentId}`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   if (resp.status === 404) {
-    throw new Error(
-      `Canvas page "${STAFF_PAGE_SLUG}" does not exist in course ${CS_393_COURSE_ID} — ` +
-        "create it, leave it UNPUBLISHED, and set editing to teachers only",
-    );
+    throw new Error(`Canvas assignment ${assignmentId} ("${STAFF_ASSIGNMENT_KEY}") not found`);
   }
   if (!resp.ok) {
-    throw new Error(`Canvas page read ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    throw new Error(`Canvas assignment read ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   }
-  const page = await resp.json();
-  // A page with no body yet reads as null rather than as an error: that's
-  // the ordinary state before the first staff member pastes a code.
-  return typeof page?.body === "string" ? page.body : null;
+  const assignment = await resp.json();
+
+  // Refuse rather than read. A published TA Access assignment is
+  // readable by every student in the course, which turns each staff
+  // connection code into a credential anyone can copy — and the only
+  // sign would be a student quietly holding TA access. Failing staff
+  // sign-in is the far cheaper outcome, and it's loud.
+  if (assignment?.published === true) {
+    throw new Error(
+      `Canvas assignment ${assignmentId} ("${STAFF_ASSIGNMENT_KEY}") is PUBLISHED. ` +
+        "Students can read staff connection codes from it. Unpublish it in Canvas, " +
+        "and have every TA generate a fresh code.",
+    );
+  }
+
+  return typeof assignment?.description === "string" ? assignment.description : null;
 }
 
 // Returns true if the given Canvas user has a TA or Teacher enrollment
@@ -275,7 +292,7 @@ exports.verifyStudent = onRequest(
     let proof;
     try {
       proof = isTa
-        ? await fetchStaffAccessPage(canvasToken.value())
+        ? await fetchStaffAccessDescription(canvasToken.value())
         : await fetchConnectSubmission(person.id, canvasToken.value());
     } catch (err) {
       console.error(`[verifyStudent] proof read failed for ${netID} (isTa=${isTa}):`, err);
@@ -294,7 +311,7 @@ exports.verifyStudent = onRequest(
       );
       res.status(409).json({
         error: isTa
-          ? "Connection code not found on the TA Access page."
+          ? "Connection code not found on the TA Access assignment."
           : "No matching connection code submitted yet.",
         code,
       });

@@ -51,3 +51,26 @@ describe("connect assignment link", () => {
     expect(read("src/pages/onboard.js")).toContain(`courses/${deployMap.course}/`);
   });
 });
+
+// Staff prove identity on an unpublished assignment instead, because
+// Canvas won't let teaching roles submit. Same drift risk: the id is in
+// the deploy map and the URL is in an extension page.
+describe("TA Access assignment link", () => {
+  const id = deployMap.assignments?.["ta-access"];
+
+  it("is in the deploy map", () => {
+    expect(typeof id).toBe("number");
+    expect(id).toBeGreaterThan(0);
+  });
+
+  it("is not the same assignment students submit to", () => {
+    expect(id).not.toBe(deployMap.assignments?.["connect-account"]);
+  });
+
+  it("matches the URL the onboarding page opens for staff", () => {
+    const source = read("src/pages/onboard.js");
+    const match = source.match(/STAFF_PAGE_URL\s*=\s*\n?\s*"[^"]*assignments\/(\d+)"/);
+    expect(match, "onboard.js has no staff assignment URL").not.toBeNull();
+    expect(Number(match[1])).toBe(id);
+  });
+});
