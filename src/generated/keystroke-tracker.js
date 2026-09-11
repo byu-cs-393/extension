@@ -416,9 +416,20 @@
   }
   window.addEventListener("popstate", onLocationChange);
   window.addEventListener("locationchange", onLocationChange);
+  var CLAIM_HEARTBEAT_MS = 5e3;
+  var CLAIM_STALE_MS = 2e4;
+  function claimIsStale(existing) {
+    const beat = Number(existing.dataset.cs393Heartbeat);
+    if (!Number.isFinite(beat)) return true;
+    return Date.now() - beat > CLAIM_STALE_MS;
+  }
   function mountBadge() {
     const existing = document.getElementById("cs393-recording-badge");
-    if (existing) return existing.dataset.cs393ExtensionId === extensionId();
+    if (existing) {
+      if (existing.dataset.cs393ExtensionId === extensionId()) return true;
+      if (!claimIsStale(existing)) return false;
+      existing.remove();
+    }
     const badge = document.createElement("div");
     badge.id = "cs393-recording-badge";
     badge.dataset.cs393ExtensionId = extensionId();
@@ -438,8 +449,18 @@
       "user-select: none"
     ].join("; ");
     badge.textContent = "\u25CF CS 393 recording";
+    badge.dataset.cs393Heartbeat = String(Date.now());
     document.body.appendChild(badge);
+    if (claimHeartbeatTimer) clearInterval(claimHeartbeatTimer);
+    claimHeartbeatTimer = setInterval(() => {
+      const mine = document.getElementById("cs393-recording-badge");
+      if (mine?.dataset.cs393ExtensionId === extensionId()) {
+        mine.dataset.cs393Heartbeat = String(Date.now());
+      }
+    }, CLAIM_HEARTBEAT_MS);
+    return true;
   }
+  var claimHeartbeatTimer = null;
   function markBadgeDegraded() {
     const badge = document.getElementById("cs393-recording-badge");
     if (!badge) return;

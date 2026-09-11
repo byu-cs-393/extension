@@ -57,6 +57,61 @@ export const MIN_SAMPLES_FOR_CADENCE = 20;
 // resets on every page load, so it's only comparable within a session
 // that never reloaded. wallMs is the only cross-chunk clock. Events
 // without a usable wallMs are dropped rather than sorted to the epoch.
+// Drop sessions that are duplicates of one another.
+//
+// Two installed copies of the extension both record the same typing,
+// producing two near-identical sessions. claimRecordingSlot is supposed
+// to prevent that, and a bug in it is exactly why this matters: for one
+// release it refused to record at all, and before that it let both
+// copies through. Defences that live only in the extension ship to
+// students and can't be fixed without a release; this one is on the read
+// side, where a TA dashboard picks it up immediately.
+//
+// Two sessions are the same work if they cover the same problem and
+// start within a few seconds of each other. Independent attempts at the
+// same problem are minutes apart at the very least, so the window can be
+// generous without merging real re-attempts.
+const DUPLICATE_WINDOW_MS = 10000;
+
+export function dedupeSessions(sessions) {
+  const ordered = [...(sessions ?? [])]
+    .filter(Boolean)
+    .sort((a, b) => (a?.startedAt ?? 0) - (b?.startedAt ?? 0));
+
+  const kept = [];
+  for (const session of ordered) {
+    // problemSlug, which is what the stored document carries — the
+    // tracker's in-memory session calls it `slug`, and reading the wrong
+    // one compares undefined to undefined, which is true, and merges
+    // every session that merely started at a similar time.
+    const slug = session?.problemSlug ?? session?.slug ?? null;
+    const startedAt = session?.startedAt;
+    // Without both facts there's no evidence two sessions are the same
+    // work, and discarding a real session is worse than keeping a
+    // duplicate: one understates a student's effort, the other only
+    // clutters a list.
+    const identifiable = slug !== null && Number.isFinite(startedAt);
+    const twin = !identifiable
+      ? undefined
+      : kept.find(
+          (k) =>
+            (k?.problemSlug ?? k?.slug ?? null) === slug &&
+            Number.isFinite(k?.startedAt) &&
+            Math.abs(k.startedAt - startedAt) <= DUPLICATE_WINDOW_MS,
+        );
+    if (!twin) {
+      kept.push(session);
+      continue;
+    }
+    // Keep whichever recorded more. Two copies race, and the one that
+    // lost the race can hold a truncated version of the same typing —
+    // discarding the fuller record would understate the student's work.
+    const score = (x) => (x?.deltaCount ?? 0) + (x?.activeMs ?? 0) / 1000;
+    if (score(session) > score(twin)) kept[kept.indexOf(twin)] = session;
+  }
+  return kept;
+}
+
 export function flattenChunks(chunks) {
   if (!Array.isArray(chunks)) return [];
 

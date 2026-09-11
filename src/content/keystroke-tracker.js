@@ -480,9 +480,34 @@ window.addEventListener("locationchange", onLocationChange);
 
 // Returns false when another copy of the extension already owns the
 // badge — see claimRecordingSlot.
+// How long a badge can go un-refreshed before another copy may take it
+// over. Long enough that a busy tab never trips it, short enough that a
+// student who removes one copy isn't stuck waiting.
+const CLAIM_HEARTBEAT_MS = 5000;
+const CLAIM_STALE_MS = 20000;
+
+function claimIsStale(existing) {
+  const beat = Number(existing.dataset.cs393Heartbeat);
+  if (!Number.isFinite(beat)) return true;
+  return Date.now() - beat > CLAIM_STALE_MS;
+}
+
+// Returns true if THIS copy owns the recording slot.
 function mountBadge() {
   const existing = document.getElementById("cs393-recording-badge");
-  if (existing) return existing.dataset.cs393ExtensionId === extensionId();
+  if (existing) {
+    if (existing.dataset.cs393ExtensionId === extensionId()) return true;
+    // Someone else's badge. If it has stopped beating, the copy that
+    // made it is gone — uninstalled, disabled, or reloaded — and its
+    // badge is just litter left in the page. Take the slot over rather
+    // than refusing to record forever.
+    //
+    // Without this, a student who fixes the problem by removing the
+    // extra copy still gets nothing until they reload the tab, which
+    // is not an obvious thing to know to do.
+    if (!claimIsStale(existing)) return false;
+    existing.remove();
+  }
   const badge = document.createElement("div");
   badge.id = "cs393-recording-badge";
   // Stamped so a second copy can recognise the badge as someone else's.
@@ -505,8 +530,26 @@ function mountBadge() {
     "user-select: none",
   ].join("; ");
   badge.textContent = "● CS 393 recording";
+  badge.dataset.cs393Heartbeat = String(Date.now());
   document.body.appendChild(badge);
+  // Keep the claim alive so a second copy can tell the difference
+  // between "someone is recording" and "someone was recording and is
+  // now gone".
+  if (claimHeartbeatTimer) clearInterval(claimHeartbeatTimer);
+  claimHeartbeatTimer = setInterval(() => {
+    const mine = document.getElementById("cs393-recording-badge");
+    if (mine?.dataset.cs393ExtensionId === extensionId()) {
+      mine.dataset.cs393Heartbeat = String(Date.now());
+    }
+  }, CLAIM_HEARTBEAT_MS);
+  // The return this function was missing. Without it the create path
+  // fell off the end as undefined, claimRecordingSlot read that as
+  // "someone else owns the slot", and a SINGLE installed copy showed
+  // "two copies installed" and recorded nothing at all.
+  return true;
 }
+
+let claimHeartbeatTimer = null;
 
 // Recording, but without the editor hook — clipboard and tab events only.
 // Distinct from the stopped state: something IS still being written, just

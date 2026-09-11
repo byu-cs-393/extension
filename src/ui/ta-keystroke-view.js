@@ -36,6 +36,7 @@ import {
   totalActiveMs,
   activeMsByProblem,
   formatDuration,
+  dedupeSessions,
 } from "../data/keystroke-analysis.js";
 
 // Summaries already computed this page-load, keyed by sessionId, so
@@ -51,9 +52,12 @@ export function clearSessionCache() {
 export async function fetchKeystrokeSessions(netID, deps = {}) {
   const fetchCollection = deps.fetchCollection ?? firestoreFetchCollection;
   const sessions = await fetchCollection(`students/${netID}/keystrokeSessions`);
-  return sessions
-    .filter((s) => s?.sessionId)
-    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  // Deduped here rather than at each call site, so nothing downstream —
+  // the session list, the time totals, the suspicion signals — can
+  // double-count a student who had two copies of the extension running.
+  return dedupeSessions(sessions.filter((s) => s?.sessionId)).sort(
+    (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0),
+  );
 }
 
 // Returns { summary, events } — the player needs the raw event stream to

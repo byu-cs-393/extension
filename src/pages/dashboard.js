@@ -1,6 +1,9 @@
 import { fetchStudent, fetchCollection } from "../platform/firestore.js";
 import { getRole } from "../platform/auth.js";
-import { trackedActiveMsInWindow } from "../data/keystroke-analysis.js";
+import {
+  trackedActiveMsInWindow,
+  dedupeSessions,
+} from "../data/keystroke-analysis.js";
 import { pendingAutoSubmissions } from "../data/auto-submit.js";
 import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
@@ -467,8 +470,10 @@ async function submitPendingApprovals() {
 async function refreshKeystrokeSessions() {
   if (!currentNetID) return;
   try {
-    currentKeystrokeSessions = await fetchCollection(
-      `students/${currentNetID}/keystrokeSessions`,
+    // Deduped so a student who ran two copies of the extension doesn't
+    // see their study time counted twice. See dedupeSessions.
+    currentKeystrokeSessions = dedupeSessions(
+      await fetchCollection(`students/${currentNetID}/keystrokeSessions`),
     );
     renderWeeks();
   } catch (err) {
@@ -519,7 +524,7 @@ async function initWeeks(netID) {
   currentAssignmentProgress = assignmentProgress;
   currentSignoffStaff = signoffStaff;
   currentActiveOa = activeOa;
-  currentKeystrokeSessions = keystrokeSessions;
+  currentKeystrokeSessions = dedupeSessions(keystrokeSessions);
   // Preload runtime-shape OAs for every topic so the sync third-card
   // dispatcher can render OA cards without an async fetch mid-render.
   const oaEntries = await Promise.all(
