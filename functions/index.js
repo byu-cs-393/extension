@@ -143,6 +143,42 @@ async function fetchConnectSubmission(canvasUserId, token) {
   return typeof submission?.body === "string" ? submission.body : null;
 }
 
+// The Canvas page staff paste their connection code into.
+//
+// Staff cannot submit to assignments — Canvas hides submission from
+// anyone with a teaching role — so the student proof channel is closed
+// to them. They need a surface only staff can write.
+//
+// An UNPUBLISHED page with teacher-only editing is that surface, and it
+// gives both properties at once: students can't edit it (staff-only
+// editing) and can't read it (unpublished content is invisible to
+// them). So a student can neither forge a code onto it nor steal one
+// from it.
+const STAFF_PAGE_SLUG = "ta-access";
+
+// Returns the page body, or null if the page has no content yet.
+// Throws if the page doesn't exist — that's course setup, not a person's
+// mistake, and every staff sign-in fails until it's fixed.
+async function fetchStaffAccessPage(token) {
+  const url = `${CANVAS_BASE}/api/v1/courses/${CS_393_COURSE_ID}/pages/${STAFF_PAGE_SLUG}`;
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (resp.status === 404) {
+    throw new Error(
+      `Canvas page "${STAFF_PAGE_SLUG}" does not exist in course ${CS_393_COURSE_ID} — ` +
+        "create it, leave it UNPUBLISHED, and set editing to teachers only",
+    );
+  }
+  if (!resp.ok) {
+    throw new Error(`Canvas page read ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  }
+  const page = await resp.json();
+  // A page with no body yet reads as null rather than as an error: that's
+  // the ordinary state before the first staff member pastes a code.
+  return typeof page?.body === "string" ? page.body : null;
+}
+
 // Returns true if the given Canvas user has a TA or Teacher enrollment
 // in the given course. Any failure (network, permissions, unexpected
 // response shape) returns false — we never want to fail a student
@@ -207,53 +243,63 @@ exports.verifyStudent = onRequest(
       return;
     }
 
-    // Identity: the connection code has to be sitting in this student's
-    // own Canvas submission.
+    // Which proof channel applies depends on whether Canvas considers
+    // this person staff. Asked BEFORE identity because the answer selects
+    // how identity gets proved — staff can't submit to assignments, so
+    // the student channel simply isn't open to them.
     //
-    // Everything above proves enrollment. This proves possession of the
-    // account, and it's the only step that does. A classmate can list
-    // the roster and learn any netID, but submissions are readable only
-    // by their author and by graders — so they cannot discover somebody
-    // else's code, and without it they cannot claim to be them.
-    let submissionBody;
-    try {
-      submissionBody = await fetchConnectSubmission(person.id, canvasToken.value());
-    } catch (err) {
-      console.error(`[verifyStudent] connect submission read failed for ${netID}:`, err);
-      res.status(500).json({ error: "Canvas lookup failed.", code: "internal" });
-      return;
-    }
-    if (submissionBody === null) {
-      console.warn(`[verifyStudent] ${netID} has not submitted a connection code`);
-      res.status(409).json({
-        error: "No connection code submitted yet.",
-        code: "code-not-submitted",
-      });
-      return;
-    }
-    if (!submissionMatchesCode(submissionBody, connectCode)) {
-      console.warn(`[verifyStudent] ${netID} submitted a code that does not match`);
-      res.status(403).json({
-        error: "The submitted code does not match.",
-        code: "code-mismatch",
-      });
-      return;
-    }
-
-    // Identity confirmed. Now check whether this student is also a
-    // TA/instructor in the course — if so, mint the token with an
-    // additional `role: "ta"` claim so Firestore rules and the
-    // extension UI can gate TA-only features on it.
+    // This is also the claim that grants TA access to every student's
+    // keystroke data, so it is never taken from the request. It comes
+    // from Canvas, via the course token, every single time.
     //
-    // Failure of this check silently omits the claim (see
-    // isCourseTaOrInstructor's error handling) — we never want a
-    // student sign-in to fail because the TA lookup had a network
-    // hiccup. Non-TAs get the same token they always got.
+    // It returns false on any failure, which fails in the safe direction:
+    // a hiccup can never promote someone to staff, only demote. The cost
+    // is that a TA hitting a transient failure gets routed to the student
+    // channel and told to submit to an assignment they can't submit to.
+    // Rare, self-correcting on retry, and much better than the inverse.
     const isTa = await isCourseTaOrInstructor(
       person.id,
       CS_393_COURSE_ID,
-      canvasToken.value()
+      canvasToken.value(),
     );
+
+    // Identity. Everything above proves enrollment; this proves the
+    // person holds the account, and it's the only step that does.
+    //
+    // Both channels work the same way: the code has to appear somewhere
+    // in Canvas that only this person could have put it, read back with
+    // the course's own credentials. Students use their submission, which
+    // nobody else can write and only graders can read. Staff use an
+    // unpublished staff-only page, which students can neither write nor
+    // read.
+    let proof;
+    try {
+      proof = isTa
+        ? await fetchStaffAccessPage(canvasToken.value())
+        : await fetchConnectSubmission(person.id, canvasToken.value());
+    } catch (err) {
+      console.error(`[verifyStudent] proof read failed for ${netID} (isTa=${isTa}):`, err);
+      res.status(500).json({ error: "Canvas lookup failed.", code: "internal" });
+      return;
+    }
+
+    if (proof === null || !submissionMatchesCode(proof, connectCode)) {
+      // Deliberately one branch per channel rather than distinguishing
+      // "nothing there" from "wrong code": on a shared staff page those
+      // are the same situation from the person's point of view, and the
+      // fix is identical.
+      const code = isTa ? "code-not-on-staff-page" : "code-not-submitted";
+      console.warn(
+        `[verifyStudent] ${netID} failed the ${isTa ? "staff page" : "submission"} check`,
+      );
+      res.status(409).json({
+        error: isTa
+          ? "Connection code not found on the TA Access page."
+          : "No matching connection code submitted yet.",
+        code,
+      });
+      return;
+    }
 
     const additionalClaims = isTa ? { role: "ta" } : undefined;
     const customToken = await getAuth().createCustomToken(netID, additionalClaims);

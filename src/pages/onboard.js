@@ -28,6 +28,10 @@ const step1Panel = document.querySelector('.step-panel[data-step="1"]');
 const connectCodeEl = document.getElementById("connect-code");
 const copyCodeBtn = document.getElementById("copy-code-btn");
 const openAssignmentBtn = document.getElementById("open-assignment-btn");
+const openStaffPageBtn = document.getElementById("open-staff-page-btn");
+const studentSteps = document.getElementById("student-steps");
+const staffSteps = document.getElementById("staff-steps");
+const roleToggleBtn = document.getElementById("role-toggle-btn");
 const newCodeBtn = document.getElementById("new-code-btn");
 const netidInput = document.getElementById("input-netid");
 const step1Form = document.getElementById("step1-form");
@@ -89,6 +93,24 @@ function showStep(n) {
 // this can't drift into a dead link unnoticed.
 const CONNECT_ASSIGNMENT_URL =
   "https://byu.instructure.com/courses/35464/assignments/1498932";
+
+// Where staff paste the same code. Unpublished and staff-editable, so
+// students can neither write a code onto it nor read one off it — which
+// is what makes it a valid proof channel. See fetchStaffAccessPage.
+const STAFF_PAGE_URL = "https://byu.instructure.com/courses/35464/pages/ta-access";
+
+// Instructions only. The server picks the channel from the person's
+// Canvas enrolment, so flipping this grants nothing — a student who
+// toggles it is still checked against their submission.
+let showingStaffSteps = false;
+
+function renderRoleSteps() {
+  studentSteps.hidden = showingStaffSteps;
+  staffSteps.hidden = !showingStaffSteps;
+  roleToggleBtn.textContent = showingStaffSteps
+    ? "I'm a student"
+    : "I'm a TA or instructor";
+}
 
 // Held in storage.local, not just memory: a student opens Canvas in
 // another tab, pastes, and comes back — possibly after this page has
@@ -194,6 +216,14 @@ function friendlyVerifyError(error) {
         "assignment in Canvas, paste your code as the submission, and " +
         "submit it — then click Verify again."
       );
+    // Staff only: Canvas doesn't let teaching roles submit to
+    // assignments, so they prove it on a staff-only page instead.
+    case "code-not-on-staff-page":
+      return (
+        "We don't see your code on the TA Access page. Open it in Canvas, " +
+        "click Edit, add your code on its own line, and save — then click " +
+        "Verify again."
+      );
     case "code-mismatch":
       return (
         "The code in your Canvas submission doesn't match the one above. " +
@@ -277,6 +307,16 @@ welcomeContinueBtn.addEventListener("click", () => {
 
 openAssignmentBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: CONNECT_ASSIGNMENT_URL, active: true });
+});
+
+openStaffPageBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: STAFF_PAGE_URL, active: true });
+});
+
+roleToggleBtn.addEventListener("click", () => {
+  showingStaffSteps = !showingStaffSteps;
+  renderRoleSteps();
+  clearStatus(step1Status);
 });
 
 copyCodeBtn.addEventListener("click", async () => {

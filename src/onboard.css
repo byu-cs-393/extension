@@ -610,3 +610,11 @@ h1 {
 .connect-steps li {
   padding-left: 4px;
 }
+
+/* Side-by-side secondary actions under step 1. */
+.onboard-alt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}

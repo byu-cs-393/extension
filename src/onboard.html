@@ -110,13 +110,28 @@
           <button type="button" class="btn-link inline" id="copy-code-btn">Copy code</button>
         </div>
 
-        <ol class="connect-steps">
+        <ol class="connect-steps" id="student-steps">
           <li>
             <button type="button" class="btn-primary" id="open-assignment-btn">
               Open the assignment in Canvas →
             </button>
           </li>
           <li>Paste the code as your submission and submit it.</li>
+          <li>Come back here and click Verify.</li>
+        </ol>
+
+        <!-- Staff can't submit to assignments — Canvas hides submission
+             from teaching roles — so they paste the same code onto a
+             staff-only page instead. This toggle only changes the
+             instructions; the server decides which channel to check from
+             the person's Canvas enrolment, never from anything sent. -->
+        <ol class="connect-steps" id="staff-steps" hidden>
+          <li>
+            <button type="button" class="btn-primary" id="open-staff-page-btn">
+              Open the TA Access page in Canvas →
+            </button>
+          </li>
+          <li>Click <strong>Edit</strong>, add your code on its own line, and save.</li>
           <li>Come back here and click Verify.</li>
         </ol>
 
@@ -141,9 +156,14 @@
           <div id="step1-status" class="onboard-status" role="status" aria-live="polite"></div>
         </form>
 
-        <button type="button" class="btn-link" id="new-code-btn">
-          Generate a new code
-        </button>
+        <div class="onboard-alt-actions">
+          <button type="button" class="btn-link" id="role-toggle-btn">
+            I'm a TA or instructor
+          </button>
+          <button type="button" class="btn-link" id="new-code-btn">
+            Generate a new code
+          </button>
+        </div>
       </section>
 
       <!-- Step 2: LeetCode -->
