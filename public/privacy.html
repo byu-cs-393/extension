@@ -37,7 +37,7 @@
   </head>
   <body>
     <h1>CS 393 Buddy — Privacy Policy</h1>
-    <p class="updated">Last updated 31 August 2026</p>
+    <p class="updated">Last updated 10 September 2026</p>
 
     <p>
       CS 393 Buddy is a Chrome extension built for one course: BYU CS 393,
@@ -50,7 +50,8 @@
       <strong>The short version.</strong> On LeetCode problem pages, the
       extension records what you type in the code editor, what you paste and
       copy, and when the tab is in the foreground. Your instructor and TAs can
-      see it. It records nothing on any other website.
+      see it. It records nothing on any other website — including Canvas,
+      where it runs no code at all.
     </div>
 
     <h2>What is collected</h2>
@@ -59,8 +60,15 @@
       <tr><th>Data</th><th>When</th><th>Why</th></tr>
       <tr>
         <td>Your BYU netID and name</td>
-        <td>During onboarding, read from your signed-in Canvas session</td>
+        <td>You type them during onboarding</td>
         <td>To identify you to the course and to submit work as you</td>
+      </tr>
+      <tr>
+        <td>A connection code</td>
+        <td>Generated during onboarding; you paste it into a Canvas
+        assignment</td>
+        <td>To confirm the Canvas account you name is actually yours. See
+        <a href="#identity">how onboarding verifies you</a></td>
       </tr>
       <tr>
         <td>Your LeetCode username and solved problems</td>
@@ -95,13 +103,40 @@
     <h2>What is not collected</h2>
     <ul>
       <li>
-        Anything on websites other than LeetCode problem pages and BYU Canvas.
-        The extension has no access to your other tabs, browsing history, or
-        clipboard elsewhere.
+        Anything on websites other than LeetCode problem pages. The extension
+        has no access to your other tabs, browsing history, or clipboard
+        elsewhere.
+      </li>
+      <li>
+        <strong>Anything on Canvas.</strong> The extension runs no code on
+        byu.instructure.com and Chrome does not grant it access there. It
+        cannot read your grades, your messages, your other courses, or your
+        Canvas session.
       </li>
       <li>Your Canvas or LeetCode password. The extension never sees either.</li>
       <li>Anything while the extension is removed or disabled.</li>
     </ul>
+
+    <h2 id="identity">How onboarding verifies you</h2>
+    <p>
+      The extension has to know which Canvas account is yours, and it cannot
+      simply trust what it is told — it runs on your computer, where anything
+      it reports could be altered. Earlier versions read your identity from
+      your signed-in Canvas session. That access has been removed.
+    </p>
+    <p>
+      Instead, onboarding shows you a randomly generated code. You paste it
+      into a zero-point Canvas assignment called <em>Connect Your Account</em>
+      and submit it. The course's server then reads that submission using the
+      course's own Canvas credentials and checks the code matches. Because
+      only you can submit under your own Canvas login, a code in your
+      submission shows the account is yours.
+    </p>
+    <p>
+      The code is generated for you rather than chosen, so it is never a
+      password you use anywhere else. It is meaningful only for this one
+      check, in this one course.
+    </p>
 
     <h2>Who can see it</h2>
     <p>
@@ -116,6 +151,12 @@
       observation with its most likely innocent explanation attached — it does
       not accuse anyone of anything, and a human always decides what a session
       means.
+    </p>
+    <p>
+      Your connection code is visible to course staff too, since it sits in a
+      Canvas submission they can read. It grants nothing on its own — it
+      proves only that you were signed in to Canvas when you submitted it.
+      Still, please don't share it, and don't submit anyone else's.
     </p>
 
     <h2>Where it is stored</h2>
