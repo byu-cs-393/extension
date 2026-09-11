@@ -32,7 +32,6 @@ initializeApp();
 // Token must have permission to look up student profiles via
 // /api/v1/users/sis_login_id:<netID>/profile.
 const canvasToken = defineSecret("CANVAS_API_TOKEN");
-const anthropicKey = defineSecret("ANTHROPIC_API_KEY");
 
 const CANVAS_BASE = "https://byu.instructure.com";
 
@@ -1593,6 +1592,32 @@ const {
 const SUGGESTION_MODEL = "claude-sonnet-5";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
+// Read from the environment rather than bound with defineSecret().
+//
+// defineSecret makes the secret a DEPLOY-TIME requirement: firebase
+// refuses to deploy anything in this file until the secret exists, so one
+// unbuilt feature was blocking the roster and connect-code fixes that
+// students are actually waiting on.
+//
+// Reading it at call time inverts that. Everything deploys, and only
+// suggestProblems fails — with a clear message rather than an Anthropic
+// 401 — until a key is set.
+//
+// WHEN THE KEY ARRIVES, this is the change to undo:
+//
+//   1. firebase functions:secrets:set ANTHROPIC_API_KEY
+//   2. add `const anthropicKey = defineSecret("ANTHROPIC_API_KEY");`
+//      back at the top of this file
+//   3. add `secrets: [anthropicKey],` to suggestProblems' options
+//   4. replace anthropicApiKey() below with anthropicKey.value()
+//
+// Step 3 is the one that matters: without it the value never reaches
+// process.env, no matter what Secret Manager holds.
+function anthropicApiKey() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  return typeof key === "string" && key.startsWith("sk-ant-") ? key : null;
+}
+
 // A shortlist fingerprint. Cached suggestions are reused only while the
 // inputs that produced them are unchanged — solve a problem and the
 // shortlist shifts, the hash changes, and the next request regenerates.
@@ -1603,7 +1628,6 @@ function shortlistHash(candidates, limit) {
 
 exports.suggestProblems = onRequest(
   {
-    secrets: [anthropicKey],
     region: "us-central1",
     cors: true,
   },
@@ -1639,6 +1663,19 @@ exports.suggestProblems = onRequest(
       return;
     }
     const netID = decoded.uid;
+
+    // Checked after auth so an unauthenticated caller can't probe whether
+    // the course has a key configured, and before any work so nothing is
+    // computed that can't be used.
+    const apiKey = anthropicApiKey();
+    if (!apiKey) {
+      console.warn("[suggestProblems] no ANTHROPIC_API_KEY configured — feature is off");
+      res.status(503).json({
+        error: "Problem suggestions aren't switched on for this course yet.",
+        code: "suggestions-unavailable",
+      });
+      return;
+    }
 
     const { weekNum, week, candidates, signals, limit } = req.body ?? {};
     if (!Number.isInteger(weekNum)) {
@@ -1689,7 +1726,7 @@ exports.suggestProblems = onRequest(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-api-key": anthropicKey.value(),
+          "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify(requestBody),
