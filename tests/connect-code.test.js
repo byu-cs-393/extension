@@ -20,8 +20,19 @@ const {
   submissionMatchesCode,
 } = require("../functions/connect-code.js");
 
-// How Canvas actually returns an online_text_entry body.
-const submitted = (text) => `<p>${text}</p>`;
+// How Canvas actually returns an online_text_entry body — captured from
+// a real submission in course 35464.
+//
+// Note the stylesheet link. Canvas prepends the course's CSS to every
+// submission body the API returns, which is not in any documentation and
+// is exactly the sort of thing that breaks parsing written against an
+// assumption. It's stripped by the tag regex because it contains no ">",
+// but if that ever stops holding, the S3 URL lands in the compared text.
+const CANVAS_CSS_PREFIX =
+  '<link rel="stylesheet" href="https://instructure-uploads.s3.amazonaws.com' +
+  "/account_74070000000000001/attachments/8409020/dp_app.css\">";
+
+const submitted = (text) => `${CANVAS_CSS_PREFIX}<p>${text}</p>`;
 
 describe("generateConnectCode", () => {
   it("produces a code of the agreed length", () => {
@@ -78,6 +89,21 @@ describe("submissionMatchesCode", () => {
   it("survives the entities Canvas's editor introduces", () => {
     expect(submissionMatchesCode("<p>7F3K-92QR&nbsp;</p>", code)).toBe(true);
     expect(submissionMatchesCode("<div><b>7F3K</b>-92QR</div>", code)).toBe(true);
+  });
+
+  // The real nesting Canvas produced for a study submission.
+  it("handles Canvas's nested div wrapper", () => {
+    expect(
+      submissionMatchesCode(
+        `${CANVAS_CSS_PREFIX}<div>\n<div><span>7F3K-92QR</span></div>\n</div>`,
+        code,
+      ),
+    ).toBe(true);
+  });
+
+  // The injected stylesheet must never satisfy a match on its own.
+  it("does not match on the injected stylesheet alone", () => {
+    expect(submissionMatchesCode(CANVAS_CSS_PREFIX, code)).toBe(false);
   });
 
   it("rejects a submission with no code in it", () => {
