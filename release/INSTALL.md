@@ -45,9 +45,11 @@ session — so you prove it once, by hand:
 
 1. Onboarding shows a **connection code**, something like `7F3K-92QR`
 2. Click **Open the assignment in Canvas**, paste the code as your
-   submission to **Connect Your Account (Optional — CS 393 Buddy)**, and
-   submit it. It's worth 0
-   points and is never graded — it exists only to carry the code
+   submission, and submit it. It's worth 0 points and is never graded —
+   it exists only to carry the code. (If the button doesn't work, the
+   assignment is **Connect Your Account (Optional — CS 393 Buddy)**,
+   under Milestones:
+   <https://byu.instructure.com/courses/35464/assignments/3273213>)
 3. Come back to the onboarding tab, type your **netID**, and click
    **Verify**
 4. **Sign in to LeetCode** at leetcode.com. Your solved problems sync

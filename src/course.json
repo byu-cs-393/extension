@@ -76,7 +76,8 @@
             "final"
           ],
           "ids": [
-            "connect-with-class"
+            "connect-with-class",
+            "connect-account"
           ]
         }
       },
@@ -123,6 +124,12 @@
         "title": "Amazing Project",
         "source": "amazing-project.md",
         "module": "Extra Credit"
+      },
+      {
+        "id": "cs393-buddy",
+        "title": "CS 393 Buddy (Optional Extension)",
+        "source": "extension.md",
+        "module": "Milestones"
       }
     ],
     "nav": [
@@ -1810,6 +1817,13 @@
       "points": 0,
       "tbd": true,
       "doc": "extra-credit.md#add-a-feature-or-fix-a-bug-tbd"
+    },
+    {
+      "id": "connect-account",
+      "title": "Connect Your Account (Optional — CS 393 Buddy)",
+      "category": "performance",
+      "points": 0,
+      "desc": "Only for students using the optional CS 393 Buddy extension. Worth 0 points and never graded. See the [CS 393 Buddy](extension.md) page above for what the extension is and how to install it.\n\nThe extension shows you a connection code. Paste it here, submit, then click Verify in the extension. Submitting from your own Canvas login is how the extension confirms the account is yours — so don't share your code, and never submit someone else's. You can resubmit any time; the most recent one counts."
     }
   ]
 }

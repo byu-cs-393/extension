@@ -80,8 +80,15 @@ function showStep(n) {
 // functions/connect-code.js for why that's the proof and the earlier
 // approaches weren't.
 
+// Links straight at the assignment rather than the assignment list —
+// students shouldn't have to hunt for it among 53 others.
+//
+// The id is duplicated from functions/deploy.fall-2026.json, which is the
+// source of truth. It can't be imported: the deploy map ships with the
+// Cloud Functions, not the extension. A test asserts the two agree, so
+// this can't drift into a dead link unnoticed.
 const CONNECT_ASSIGNMENT_URL =
-  "https://byu.instructure.com/courses/35464/assignments";
+  "https://byu.instructure.com/courses/35464/assignments/3273213";
 
 // Held in storage.local, not just memory: a student opens Canvas in
 // another tab, pastes, and comes back — possibly after this page has
