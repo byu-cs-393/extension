@@ -493,14 +493,14 @@
     const badge = document.getElementById("cs393-recording-badge");
     if (badge) {
       badge.style.background = "rgba(217, 119, 6, 0.95)";
-      badge.textContent = "\u26A0 CS 393 \u2014 two copies installed";
+      badge.textContent = "\u25CF CS 393 recording \u2014 2 copies installed";
       badge.setAttribute(
         "aria-label",
-        "CS 393 Buddy: two copies of the extension are installed"
+        "CS 393 Buddy: recording normally, but two copies of the extension are installed. Remove one at chrome://extensions."
       );
     }
-    console.error(
-      "[CS 393 Buddy] another copy of this extension is already recording this page, so this one will not. Two copies double every recorded session. Remove the old one at chrome://extensions."
+    console.warn(
+      "[CS 393 Buddy] another copy of this extension is already recording this page, so this one will not. Your work IS being recorded \u2014 by the other copy. Remove the extra one at chrome://extensions."
     );
     return false;
   }

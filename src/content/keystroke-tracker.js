@@ -604,19 +604,26 @@ function extensionId() {
 // a silently duplicating one.
 function claimRecordingSlot() {
   if (mountBadge()) return true;
+  // Amber, because there IS something to fix — but the wording has to
+  // say recording is still happening. The badge this rewrites belongs to
+  // the copy that WON the slot and is recording normally; the previous
+  // text ("two copies installed") read as a failure, so a student saw a
+  // warning, assumed nothing was being captured, and reported the
+  // extension as broken when it was working.
   const badge = document.getElementById("cs393-recording-badge");
   if (badge) {
     badge.style.background = "rgba(217, 119, 6, 0.95)";
-    badge.textContent = "⚠ CS 393 — two copies installed";
+    badge.textContent = "● CS 393 recording — 2 copies installed";
     badge.setAttribute(
       "aria-label",
-      "CS 393 Buddy: two copies of the extension are installed",
+      "CS 393 Buddy: recording normally, but two copies of the extension " +
+        "are installed. Remove one at chrome://extensions.",
     );
   }
-  console.error(
+  console.warn(
     "[CS 393 Buddy] another copy of this extension is already recording " +
-      "this page, so this one will not. Two copies double every recorded " +
-      "session. Remove the old one at chrome://extensions.",
+      "this page, so this one will not. Your work IS being recorded — by " +
+      "the other copy. Remove the extra one at chrome://extensions.",
   );
   return false;
 }
