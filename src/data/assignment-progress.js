@@ -79,6 +79,10 @@ async function patchLocalCache(assignmentId, doc) {
   };
   bundle.syncedAt = Date.now();
   await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
+  // Hand back the MERGED document, not the patch. Callers need to know
+  // what the document now looks like, and the patch alone is missing
+  // every field it didn't touch.
+  return { ...existing, ...doc };
 }
 
 // ---- Student-side writes ----------------------------------------------
@@ -156,6 +160,15 @@ export async function recordSignoffDecision({
     ...(signoffHowItWent ? { signoffHowItWent } : {}),
   };
   await patchDoc(path, newDoc);
-  await patchLocalCache(assignmentId, newDoc);
-  return newDoc;
+  // Return the merged document rather than the patch.
+  //
+  // newDoc is only the fields this write touches — it has no `type` and
+  // no `weekNum`, because those were set when the document was created.
+  // Returning it meant the TA dashboard called autoSubmission() with a
+  // doc whose `type` was undefined, which failed the very first check
+  // and returned null. submitForStudent then bailed without logging, so
+  // every TA pass-off silently failed to reach Canvas, and it only ever
+  // worked from the student's own dashboard — which reads the full
+  // document, type included.
+  return patchLocalCache(assignmentId, newDoc);
 }

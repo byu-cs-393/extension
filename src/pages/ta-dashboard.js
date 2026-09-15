@@ -405,7 +405,23 @@ function promptForText(message) {
 // it didn't take.
 async function submitForStudent(item, progress) {
   const submission = autoSubmission(progress);
-  if (!submission) return;
+  if (!submission) {
+    // Never silent. A bare `return` here hid a bug where every pass-off
+    // failed to submit: autoSubmission rejected the progress doc, this
+    // returned, and the TA saw nothing to suggest Canvas hadn't been
+    // told. If it declines, say which condition and with what.
+    console.warn(
+      `[CS 393 Buddy] no Canvas submission for ${item.netID} / ${item.assignmentId} —`,
+      {
+        type: progress?.type ?? "(missing)",
+        status: progress?.status ?? "(missing)",
+        assignmentId: progress?.assignmentId ?? "(missing)",
+        canvasSubmittedAt: progress?.canvasSubmittedAt ?? null,
+        signoffAt: progress?.signoffAt ?? null,
+      },
+    );
+    return;
+  }
   try {
     const outcome = await sendCanvasSubmission({
       type: submission.type,
