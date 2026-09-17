@@ -208,6 +208,12 @@ service cloud.firestore {
       // this collection; adding the self-report types + connect + study
       // + instructor + extra-credit so any card's Canvas-submit flow
       // can drop a marker (canvasSubmittedAt + submissionId) here.
+      //
+      // 'oa' holds only an OA's CANVAS submission state — the queued
+      // submission and its receipt. The attempts themselves (timer,
+      // solved problems, pass/fail) stay on weekProgress. Submissions are
+      // sent from the student's own browser by reading this collection,
+      // so an OA submission has to be recordable here to be sent at all.
       return 'assignmentId' in data
           && data.assignmentId == assignmentId
           && 'type' in data
@@ -215,7 +221,7 @@ service cloud.firestore {
               'performance', 'live-interview',
               'peer-mock', 'professional-mock',
               'instructor-interview', 'connect-with-class', 'study',
-              'extra-credit'
+              'extra-credit', 'oa'
             ];
     }
 

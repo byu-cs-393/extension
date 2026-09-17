@@ -19,8 +19,6 @@ import { routeOutboxMessage } from "./canvas-outbox-worker.js";
 
 const PUSH_MY_RECENT_GRADE_URL =
   "https://cs393-496021.web.app/api/pushMyRecentGrade";
-const SUBMIT_CANVAS_ASSIGNMENT_URL =
-  "https://cs393-496021.web.app/api/submitCanvasAssignment";
 
 const REFRESH_ALARM = "firebaseAuthRefresh";
 // Firebase ID tokens last 60 min. Refreshing every 30 min keeps a fresh
@@ -84,36 +82,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(result ?? { status: response.status });
       } catch (error) {
         console.error("[CS 393 Buddy] background push failed:", error);
-        sendResponse({ outcome: "error", error: error.message ?? String(error) });
-      }
-    })();
-    return true;
-  }
-
-  // Auto-submit path: extension pages call this after computing a filled
-  // submission body (e.g., an OA pass with attempt# + accepted URLs).
-  // Payload is forwarded verbatim to submitCanvasAssignment; the caller
-  // decides which assignment + what to submit.
-  if (message?.type === "submitCanvasAssignment") {
-    (async () => {
-      try {
-        const idToken = await getIdToken();
-        if (!idToken) {
-          sendResponse({ outcome: "no-auth", note: "no ID token cached" });
-          return;
-        }
-        const response = await fetch(SUBMIT_CANVAS_ASSIGNMENT_URL, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${idToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(message.payload ?? {}),
-        });
-        const result = await response.json().catch(() => null);
-        sendResponse(result ?? { status: response.status });
-      } catch (error) {
-        console.error("[CS 393 Buddy] background submit failed:", error);
         sendResponse({ outcome: "error", error: error.message ?? String(error) });
       }
     })();

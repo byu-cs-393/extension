@@ -15,13 +15,12 @@
 // Behavior:
 //   - Picks the schema for {type, assignmentId} and renders a modal
 //     with one <input>/<select>/<textarea> per field.
-//   - On Submit: validates required fields, calls fillSubmissionTemplate
-//     to produce the HTML body, sends {type: "submitCanvasAssignment", ...}
-//     to the background worker, awaits Cloud Function result.
-//   - On success: patches students/{netID}/assignmentProgress/{assignmentId}
-//     with { canvasSubmittedAt, canvasSubmissionId, type, weekNum? },
-//     also patches the local cache so the dashboard re-renders as
-//     "submitted" the same tick.
+//   - On Submit: validates required fields, then queues the submission on
+//     students/{netID}/assignmentProgress/{assignmentId} as
+//     pendingSubmission, and opens Canvas in the background to send it.
+//   - The canvas-submitter content script sends it from the student's own
+//     Canvas session and records canvasSubmittedAt. See sendCanvasSubmission
+//     below for why it can't be sent from a server.
 //   - On failure: shows an error banner in the modal, keeps it open so
 //     the student can retry.
 

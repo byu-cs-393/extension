@@ -32,7 +32,7 @@
 //
 //   When no progress doc exists, the card renders in its default
 //   "unattempted" state for that type.
-import { fetchCollection, patchDoc } from "../platform/firestore.js";
+import { fetchCollection } from "../platform/firestore.js";
 import {
   startAttempt,
   endActiveAttempt,
@@ -42,8 +42,7 @@ import {
   resetOa,
 } from "../data/oa-session.js";
 import { requestSignoff } from "../data/assignment-progress.js";
-import { fillOaTemplate } from "../data/submission-templates.js";
-import { openSubmissionForm } from "./submission-form.js";
+import { openSubmissionForm, sendCanvasSubmission } from "./submission-form.js";
 import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
 import { isPending } from "../data/canvas-outbox.js";
 
@@ -688,31 +687,65 @@ function addOaTitleRow(article, topic, timerContent, weekNum) {
   article.appendChild(row);
 }
 
-// Adds a "Submit to Canvas" button (or a "✓ Submitted" receipt) at the
-// bottom of a passed OA card. On click: fills the OA template with the
-// student's attempt# + accepted problem URLs from the passing attempt,
-// forwards to the background service worker's submitCanvasAssignment
-// handler (which POSTs to the Cloud Function which POSTs to Canvas with
-// masquerade), then patches the progress doc with canvasSubmittedAt so
-// the card can show a receipt.
+// The OA's Canvas submission, shown under a passed attempt.
 //
-// One-click confirm per user preference (not fully auto): student
-// sees the button and decides when to submit.
+// Two stores, deliberately split:
 //
-// Resubmitting is allowed, same as the other card types: Canvas keeps
-// every attempt and grades the most recent, so a later submission
-// supersedes the earlier one. Firestore rules allow the student to write
-// additional fields on their own weekProgress doc.
+//   weekProgress/{week}          the ATTEMPTS — which attempt, the timer,
+//                                solved problems, pass/fail. Unchanged.
+//   assignmentProgress/oa-{topic} the CANVAS SUBMISSION — the queued send
+//                                and its receipt, like every other card.
+//
+// The submission used to POST through a Cloud Function that masqueraded as
+// the student, which can't work: the course token lacks become_user, and
+// Canvas reserves a submission to its author. It's now queued and sent from
+// the student's own Canvas session by the canvas-submitter content script,
+// which reads assignmentProgress — so that's where OA submission state must
+// live.
+//
+// One click, not automatic, per the original design: the student decides
+// when their OA goes in. Resubmitting is allowed — Canvas grades the most
+// recent attempt, so a later submission supersedes an earlier one.
 function appendCanvasSubmitRow(article, card, progress, ctx) {
   if (!ctx?.netID || !card?.topic) return;
   const assignmentId = `oa-${card.topic}`;
+  const canvasState = ctx?.assignmentProgress?.[assignmentId] ?? null;
 
-  const submittedAt = progress?.canvasSubmittedAt ?? null;
-  const submitCount = Number.isFinite(progress?.canvasSubmitCount)
-    ? progress.canvasSubmitCount
-    : submittedAt
-      ? 1
-      : 0;
+  // A receipt written to weekProgress before the move is still honoured.
+  // In practice only Canvas's Test Student could have one — the old path
+  // never succeeded for a real student — but a real receipt shouldn't
+  // silently disappear from someone's card.
+  const submittedAt =
+    canvasState?.canvasSubmittedAt ?? progress?.canvasSubmittedAt ?? null;
+  const submitCount = Number.isFinite(canvasState?.canvasSubmitCount)
+    ? canvasState.canvasSubmitCount
+    : Number.isFinite(progress?.canvasSubmitCount)
+      ? progress.canvasSubmitCount
+      : submittedAt
+        ? 1
+        : 0;
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+
+  if (isPending(canvasState)) {
+    // Queued but not yet sent — usually because Canvas wasn't open, or the
+    // student was signed out. Re-queueing would only move the timestamp, so
+    // the button just retries the send.
+    addStatusLine(article, "Queued for Canvas · finishes next time you open Canvas");
+    const retry = document.createElement("button");
+    retry.className = "btn-secondary";
+    retry.textContent = "Send now";
+    retry.title = "Opens Canvas in the background to send it.";
+    retry.addEventListener("click", () => {
+      retry.disabled = true;
+      retry.textContent = "Opening Canvas…";
+      chrome.runtime.sendMessage({ type: "canvasOutbox:drain" }).catch(() => {});
+    });
+    actions.appendChild(retry);
+    article.appendChild(actions);
+    return;
+  }
 
   if (submittedAt) {
     const line = document.createElement("div");
@@ -723,8 +756,6 @@ function appendCanvasSubmitRow(article, card, progress, ctx) {
     article.appendChild(line);
   }
 
-  const actions = document.createElement("div");
-  actions.className = "card-actions";
   const btn = document.createElement("button");
   btn.className = submittedAt ? "btn-secondary" : "btn-primary";
   btn.textContent = submittedAt ? "Submit again" : "Submit to Canvas";
@@ -734,77 +765,44 @@ function appendCanvasSubmitRow(article, card, progress, ctx) {
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     const originalText = btn.textContent;
-    btn.textContent = "Submitting…";
-    try {
-      const attemptIdx = (progress?.currentAttempt ?? 1) - 1;
-      const attempt = progress?.attempts?.[attemptIdx];
-      const solvedSlugs = attempt?.solvedSlugs ?? [];
-      // Prefer per-submission URLs from the tracker/backstop when
-      // available; fall back to the plain problem URL otherwise.
-      const solutionUrls = ctx?.solutionUrls ?? {};
-      const acceptedUrls = solvedSlugs.map(
-        (slug) => solutionUrls[slug] ?? `https://leetcode.com/problems/${slug}/`,
-      );
-      const body = fillOaTemplate({
+    btn.textContent = "Sending…";
+
+    // Captured now, at click time: which attempt passed, and the accepted
+    // solution for each problem in it. Stored as template inputs, so the
+    // body is rebuilt from exactly this when the browser sends it.
+    const attemptIdx = (progress?.currentAttempt ?? 1) - 1;
+    const attempt = progress?.attempts?.[attemptIdx];
+    const solvedSlugs = attempt?.solvedSlugs ?? [];
+    const solutionUrls = ctx?.solutionUrls ?? {};
+    const acceptedUrls = solvedSlugs.map(
+      (slug) => solutionUrls[slug] ?? `https://leetcode.com/problems/${slug}/`,
+    );
+
+    const outcome = await sendCanvasSubmission({
+      type: "oa",
+      assignmentId,
+      weekNum: ctx.weekNum,
+      netID: ctx.netID,
+      data: {
         attemptNum: progress?.currentAttempt ?? attemptIdx + 1,
         acceptedUrls,
-      });
-      const result = await new Promise((resolve) => {
-        chrome.runtime.sendMessage(
-          {
-            type: "submitCanvasAssignment",
-            payload: {
-              assignmentId,
-              submissionType: "online_text_entry",
-              body,
-            },
-          },
-          (r) => resolve(r),
-        );
-      });
-      if (result?.outcome !== "submitted") {
-        console.error("[CS 393 Buddy] Canvas submit failed:", result);
-        const hint = canvasErrorHint(result);
-        alert(
-          `Couldn't submit to Canvas.\n\n${describeCanvasError(result)}` +
-            (hint ? `\n\n${hint}` : ""),
-        );
-        btn.disabled = false;
-        btn.textContent = originalText;
-        return;
-      }
-      // Patch the weekProgress doc + local cache so this card re-renders
-      // as "✓ Submitted" without waiting for a Firestore refetch.
-      // Named `now`, not `submittedAt`: the outer scope already binds
-      // `submittedAt` to the PREVIOUS submission's timestamp, which the
-      // button label and submit count read.
-      const now = Date.now();
-      const newProgress = {
-        ...(progress ?? {}),
-        type: "onlineAssessment",
-        weekNum: ctx.weekNum,
-        canvasSubmittedAt: now,
-        canvasSubmitCount: submitCount + 1,
-        canvasSubmissionId: result.canvasSubmissionId ?? null,
-      };
-      try {
-        await patchDoc(`students/${ctx.netID}/weekProgress/${ctx.weekNum}`, newProgress);
-        const cached = await chrome.storage.local.get(PROGRESS_CACHE_KEY);
-        const bundle = cached[PROGRESS_CACHE_KEY] ?? { progress: {} };
-        bundle.progress = { ...(bundle.progress ?? {}), [ctx.weekNum]: newProgress };
-        bundle.syncedAt = Date.now();
-        await chrome.storage.local.set({ [PROGRESS_CACHE_KEY]: bundle });
-      } catch (patchErr) {
-        // Non-fatal: Canvas has the submission; we just failed to record it.
-        // The next refreshProgress round will observe the state via Firestore.
-        console.error("[CS 393 Buddy] Failed to record canvasSubmittedAt:", patchErr);
-      }
-    } catch (err) {
-      console.error("[CS 393 Buddy] Canvas submit threw:", err);
-      alert(`Couldn't submit to Canvas: ${err.message ?? String(err)}`);
+      },
+      // The student just clicked, so send it now.
+      drain: true,
+    });
+
+    if (!outcome.ok) {
+      const hint = canvasErrorHint(outcome.result);
+      alert(
+        `Couldn't queue your submission.\n\n${describeCanvasError(outcome.result)}` +
+          (hint ? `\n\n${hint}` : ""),
+      );
       btn.disabled = false;
       btn.textContent = originalText;
     }
+    // On success there's nothing to do here: the queue write updates the
+    // local progress cache, the page re-renders, and this card comes back
+    // in its "Queued" state.
   });
   actions.appendChild(btn);
   article.appendChild(actions);
