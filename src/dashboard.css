@@ -685,3 +685,12 @@ body {
   /* Tag names run long on a narrow window; wrapping beats clipping. */
   overflow-wrap: anywhere;
 }
+
+/* The suggestions header IS the toggle, so the title sits inside the
+   summary and loses the standalone title's bottom margin. */
+.suggestions-details {
+  margin-bottom: 0;
+}
+.suggestions-summary .card-title {
+  margin-bottom: 0;
+}

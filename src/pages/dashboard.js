@@ -6,6 +6,7 @@ import {
 } from "../data/keystroke-analysis.js";
 import { pendingAutoSubmissions } from "../data/auto-submit.js";
 import { suggestionsForWeek } from "../data/week-suggestions.js";
+import { createSuggestionsCard } from "../ui/suggestions-card.js";
 import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
   getVisibleWeeks,
@@ -56,6 +57,12 @@ let currentOaShapes = {};
 // Suggested practice for the current week. Computed off the vendored
 // catalog and the student's own solves — no network, no API key.
 let currentSuggestions = [];
+// Whether the student has the suggestions list open. renderWeeks rebuilds
+// the DOM on every progress change, so without remembering this the list
+// would snap shut under them mid-read. Persisted, because the dashboard is
+// opened and closed all day.
+const SUGGESTIONS_OPEN_KEY = "suggestionsOpen";
+let suggestionsOpen = false;
 let currentAssignmentProgress = {}; // { [assignmentId]: doc }
 // Keystroke session METADATA only — enough for per-week active time
 // without pulling every session's events.
@@ -159,7 +166,16 @@ function createWeekSection(cards, status) {
   section.appendChild(createRecommendedCard(cards, status));
 
   if (status === "current" && currentSuggestions.length > 0) {
-    section.appendChild(createSuggestionsCard(currentSuggestions));
+    section.appendChild(
+      createSuggestionsCard(currentSuggestions, {
+        open: suggestionsOpen,
+        onToggle: (open) => {
+          suggestionsOpen = open;
+          // Fire and forget: losing the preference isn't worth an error path.
+          chrome.storage.local.set({ [SUGGESTIONS_OPEN_KEY]: open }).catch(() => {});
+        },
+      }),
+    );
   }
 
   for (const item of cards.performanceItems ?? []) {
@@ -396,66 +412,6 @@ async function refreshSuggestions() {
   renderWeeks();
 }
 
-// Practice beyond the assigned problems.
-//
-// This fills the `outside` slot in course.json, which in most weeks just
-// says "do 4 other problems" and names none. Every pick is something the
-// student hasn't solved and the course doesn't assign in ANY week — the
-// later online assessments are all in course.json, and suggesting one
-// would hand out an assessment early.
-function createSuggestionsCard(picks) {
-  const article = document.createElement("article");
-  article.className = "card";
-
-  const title = document.createElement("div");
-  title.className = "card-title";
-  title.textContent = "Suggested for you";
-  article.appendChild(title);
-
-  const blurb = document.createElement("div");
-  blurb.className = "card-detail";
-  blurb.textContent =
-    "Extra practice on this week's topic, picked from problems you haven't solved.";
-  article.appendChild(blurb);
-
-  const list = document.createElement("ul");
-  list.className = "card-list problem-list";
-  for (const pick of picks) list.appendChild(createSuggestionItem(pick));
-  article.appendChild(list);
-
-  return article;
-}
-
-function createSuggestionItem(pick) {
-  const li = document.createElement("li");
-  li.className = "problem pending suggestion";
-
-  const link = document.createElement("a");
-  link.className = "problem-link";
-  link.href = `https://leetcode.com/problems/${pick.slug}/`;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  link.textContent = pick.title;
-
-  const difficulty = document.createElement("span");
-  difficulty.className = `problem-diff diff-${pick.difficulty.toLowerCase()}`;
-  difficulty.textContent = pick.difficulty;
-
-  li.append(link, difficulty);
-
-  // What the problem exercises, in the course's own vocabulary. Stands in
-  // for the one-line reason a model will write here once the course has an
-  // API key — until then, saying WHY it was picked still beats a bare list.
-  const why = pick.matchedTopics?.slice(0, 3).join(" · ");
-  if (why) {
-    const reason = document.createElement("div");
-    reason.className = "suggestion-why";
-    reason.textContent = why;
-    li.appendChild(reason);
-  }
-  return li;
-}
-
 function createProblemItem(p, isSolved) {
   const li = document.createElement("li");
   li.className = `problem ${isSolved ? "complete" : "pending"}`;
@@ -623,6 +579,12 @@ async function initWeeks(netID) {
     topics.map(async (t) => [t.id, await getOaRuntimeShape(t.id)]),
   );
   currentOaShapes = Object.fromEntries(oaEntries);
+  try {
+    const stored = await chrome.storage.local.get(SUGGESTIONS_OPEN_KEY);
+    suggestionsOpen = stored?.[SUGGESTIONS_OPEN_KEY] === true;
+  } catch {
+    suggestionsOpen = false;
+  }
   renderWeeks();
   // After the first paint: scoring 3,000-odd problems is quick, but the
   // week should be on screen before it runs.
