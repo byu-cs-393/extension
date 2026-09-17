@@ -101,6 +101,44 @@ describe("suggestionsForWeek, against the real course", () => {
     expect(a.map((p) => p.slug)).toEqual(b.map((p) => p.slug));
   });
 
+  it("honours an explicit difficulty, even one the course never sets", async () => {
+    // A student who asks for Hard gets Hard. The course assigns no Hard for
+    // some topics, but the catalog has plenty and they asked.
+    for (const difficulty of ["Easy", "Medium", "Hard"]) {
+      const picks = await suggestionsForWeek({
+        topicId: "graphs", solves: {}, difficulty, limit: 3,
+      });
+      expect(picks.length, difficulty).toBeGreaterThan(0);
+      expect(picks.every((p) => p.difficulty === difficulty), difficulty).toBe(true);
+    }
+  });
+
+  it("skips what the student has already been shown", async () => {
+    const [first] = await suggestionsForWeek({
+      topicId: "graphs", solves: {}, difficulty: "Medium", limit: 1,
+    });
+    const [second] = await suggestionsForWeek({
+      topicId: "graphs", solves: {}, difficulty: "Medium", limit: 1, seen: [first.slug],
+    });
+    expect(second.slug).not.toBe(first.slug);
+  });
+
+  // Easy dynamic-programming genuinely runs out — the card has to say so
+  // rather than showing an empty space.
+  it("eventually runs out at a thin difficulty", async () => {
+    const seen = [];
+    for (let i = 0; i < 40; i++) {
+      const [p] = await suggestionsForWeek({
+        topicId: "dynamic-programming", solves: {}, difficulty: "Easy", limit: 1, seen,
+      });
+      if (!p) break;
+      seen.push(p.slug);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.length).toBeLessThan(40);
+    expect(new Set(seen).size, "repeated a problem").toBe(seen.length);
+  });
+
   it("returns nothing rather than guessing for a week with no topic", async () => {
     expect(await suggestionsForWeek({ topicId: null, solves: {} })).toEqual([]);
     expect(await suggestionsForWeek({ topicId: "not-a-topic", solves: {} })).toEqual([]);

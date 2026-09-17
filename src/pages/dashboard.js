@@ -54,15 +54,24 @@ let timerInterval = null;
 // initWeeks so the sync third-card dispatcher can render OA cards
 // without an async fetch mid-render.
 let currentOaShapes = {};
-// Suggested practice for the current week. Computed off the vendored
-// catalog and the student's own solves — no network, no API key.
-let currentSuggestions = [];
+// The week whose topic suggestions are drawn from. Picks themselves are
+// fetched on demand when the card is opened, not precomputed — the card is
+// collapsed by default and most loads never need one.
+let suggestionTopicId = null;
 // Whether the student has the suggestions list open. renderWeeks rebuilds
 // the DOM on every progress change, so without remembering this the list
 // would snap shut under them mid-read. Persisted, because the dashboard is
 // opened and closed all day.
 const SUGGESTIONS_OPEN_KEY = "suggestionsOpen";
+const SUGGESTIONS_PREFS_KEY = "suggestionPrefs";
 let suggestionsOpen = false;
+// The level they last asked for, and what they've already been shown, so
+// "show another" actually does. Capped: past about thirty the student has
+// moved on, and letting it grow forever would eventually exclude the whole
+// catalog.
+let suggestionDifficulty = "Any";
+let suggestionsSeen = [];
+const SEEN_CAP = 30;
 let currentAssignmentProgress = {}; // { [assignmentId]: doc }
 // Keystroke session METADATA only — enough for per-week active time
 // without pulling every session's events.
@@ -165,14 +174,19 @@ function createWeekSection(cards, status) {
 
   section.appendChild(createRecommendedCard(cards, status));
 
-  if (status === "current" && currentSuggestions.length > 0) {
+  if (status === "current" && suggestionTopicId) {
     section.appendChild(
-      createSuggestionsCard(currentSuggestions, {
+      createSuggestionsCard({
         open: suggestionsOpen,
-        onToggle: (open) => {
-          suggestionsOpen = open;
-          // Fire and forget: losing the preference isn't worth an error path.
-          chrome.storage.local.set({ [SUGGESTIONS_OPEN_KEY]: open }).catch(() => {});
+        difficulty: suggestionDifficulty,
+        requestPick: nextSuggestion,
+        onToggle: (isOpen) => {
+          suggestionsOpen = isOpen;
+          chrome.storage.local.set({ [SUGGESTIONS_OPEN_KEY]: isOpen }).catch(() => {});
+        },
+        onDifficulty: (level) => {
+          suggestionDifficulty = level;
+          persistSuggestionPrefs();
         },
       }),
     );
@@ -388,28 +402,58 @@ function createUntrackedItem(item) {
   return li;
 }
 
-// Recompute the current week's suggestions and repaint.
-//
-// Deliberately never throws into the caller: suggestions are a bonus, and
-// a missing catalog or an odd week shouldn't cost the student their
-// dashboard.
-async function refreshSuggestions() {
+// Which topic suggestions come from. Cheap — no catalog work happens until
+// the student actually opens the card and asks for a problem.
+function refreshSuggestions() {
   const current = currentCards.find((c) => classifyWeek(c) === "current");
-  if (!current?.topic?.id) {
-    currentSuggestions = [];
-    return;
+  const topicId = current?.topic?.id ?? null;
+  if (topicId !== suggestionTopicId) {
+    suggestionTopicId = topicId;
+    // A new topic means a fresh slate; last week's picks aren't "seen" for
+    // this one's purposes.
+    suggestionsSeen = [];
   }
+}
+
+// Fetch one problem at the chosen level, skipping anything already shown.
+//
+// Deliberately never throws into the card: a suggestion is a bonus, and a
+// missing catalog shouldn't turn into an error where a student expected a
+// problem.
+async function nextSuggestion(difficulty) {
+  if (!suggestionTopicId) return null;
+  suggestionDifficulty = difficulty;
+  let pick = null;
   try {
-    currentSuggestions = await suggestionsForWeek({
-      topicId: current.topic.id,
+    [pick] = await suggestionsForWeek({
+      topicId: suggestionTopicId,
       solves: currentSolves?.solves ?? {},
-      limit: 4,
+      difficulty,
+      seen: suggestionsSeen,
+      limit: 1,
     });
   } catch (error) {
-    console.error("[CS 393 Buddy] couldn't build suggestions:", error);
-    currentSuggestions = [];
+    console.error("[CS 393 Buddy] couldn't build a suggestion:", error);
+    return null;
   }
-  renderWeeks();
+  if (pick) {
+    suggestionsSeen = [...suggestionsSeen, pick.slug].slice(-SEEN_CAP);
+  }
+  persistSuggestionPrefs();
+  return pick ?? null;
+}
+
+function persistSuggestionPrefs() {
+  chrome.storage.local
+    .set({
+      [SUGGESTIONS_PREFS_KEY]: {
+        difficulty: suggestionDifficulty,
+        seen: suggestionsSeen,
+        topicId: suggestionTopicId,
+      },
+    })
+    // Fire and forget: losing a preference isn't worth an error path.
+    .catch(() => {});
 }
 
 function createProblemItem(p, isSolved) {
@@ -579,16 +623,23 @@ async function initWeeks(netID) {
     topics.map(async (t) => [t.id, await getOaRuntimeShape(t.id)]),
   );
   currentOaShapes = Object.fromEntries(oaEntries);
+  // Before restoring preferences and before the first paint: both need to
+  // know which topic is current — the stored "already seen" list only
+  // applies to the same one, and the card only renders when there is one.
+  refreshSuggestions();
   try {
-    const stored = await chrome.storage.local.get(SUGGESTIONS_OPEN_KEY);
+    const stored = await chrome.storage.local.get([SUGGESTIONS_OPEN_KEY, SUGGESTIONS_PREFS_KEY]);
     suggestionsOpen = stored?.[SUGGESTIONS_OPEN_KEY] === true;
+    const prefs = stored?.[SUGGESTIONS_PREFS_KEY];
+    if (prefs?.difficulty) suggestionDifficulty = prefs.difficulty;
+    // Only carry "already seen" forward within the same topic.
+    if (Array.isArray(prefs?.seen) && prefs.topicId === suggestionTopicId) {
+      suggestionsSeen = prefs.seen.slice(-SEEN_CAP);
+    }
   } catch {
     suggestionsOpen = false;
   }
   renderWeeks();
-  // After the first paint: scoring 3,000-odd problems is quick, but the
-  // week should be on screen before it runs.
-  refreshSuggestions();
   startTimerLoop();
   // After the first paint, so a slow Canvas round-trip never delays the
   // dashboard appearing.

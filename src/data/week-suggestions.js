@@ -40,7 +40,20 @@ export function difficultiesFor(assignedProblems) {
 
 // Returns the shortlist for a week, or [] when there's nothing sensible to
 // suggest (no topic on the week, catalog missing, profile empty).
-export async function suggestionsForWeek({ topicId, solves, limit = 4 }) {
+//
+//   difficulty  "Easy" | "Medium" | "Hard", or "Any" to let the course's own
+//               level decide. A student who explicitly asks for Hard gets
+//               Hard, even on a topic the course never sets one for — they
+//               asked, and every topic has plenty in the catalog.
+//   seen        slugs already shown to this student, so "show another"
+//               actually shows another.
+export async function suggestionsForWeek({
+  topicId,
+  solves,
+  limit = 4,
+  difficulty = "Any",
+  seen,
+}) {
   if (!topicId) return [];
 
   let course;
@@ -78,12 +91,16 @@ export async function suggestionsForWeek({ topicId, solves, limit = 4 }) {
   // suggesting one hands a student an assessment before they sit it.
   const exclude = slugsWithin(course);
   for (const slug of Object.keys(solves ?? {})) exclude.add(slug);
+  for (const slug of seen ?? []) exclude.add(slug);
 
   return suggestProblems({
     catalog,
     profile,
     exclude,
-    difficulties: difficultiesFor(assignedProblems),
+    difficulties:
+      difficulty && difficulty !== "Any"
+        ? [difficulty]
+        : difficultiesFor(assignedProblems),
     limit,
   });
 }

@@ -664,33 +664,82 @@ body {
   color: var(--text-secondary);
 }
 
-/* ---- Suggested for you -------------------------------------------------
-   Practice beyond the assigned problems. Two lines per row: the problem
-   and its difficulty, then what it exercises underneath. No status mark —
-   there's nothing to tick off, so the row starts at the title.
+/* ---- Suggest a problem -------------------------------------------------
+   Difficulty chooser, then one problem. The header is the toggle, so the
+   title sits inside the summary and loses its standalone bottom margin. */
+.suggestions-details {
+  margin-bottom: 0;
+}
+.suggestions-summary .card-title {
+  margin-bottom: 0;
+}
 
-   Difficulty reuses .problem-diff, which was already defined here for the
-   three tiers and had no markup using it. */
-.problem.suggestion {
-  grid-template-columns: 1fr auto;
+.difficulty-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+
+.difficulty-choice {
+  padding: 4px 11px;
+  border: 1px solid var(--divider);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.difficulty-choice:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+/* The chosen level, marked through the same attribute that tells a screen
+   reader which one is active — no separate class to fall out of step. */
+.difficulty-choice[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.difficulty-choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Reserves its own height so swapping problems doesn't jump the card. */
+.suggestion-slot {
+  min-height: 46px;
+  margin-bottom: 10px;
+}
+
+.suggestion-pick-head {
+  display: flex;
   align-items: baseline;
-  row-gap: 2px;
-  padding-block: 6px;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.suggestion-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .suggestion-why {
-  grid-column: 1 / -1;
+  margin-top: 3px;
   font-size: 11px;
   color: var(--text-tertiary);
   /* Tag names run long on a narrow window; wrapping beats clipping. */
   overflow-wrap: anywhere;
 }
 
-/* The suggestions header IS the toggle, so the title sits inside the
-   summary and loses the standalone title's bottom margin. */
-.suggestions-details {
+.suggestion-message {
   margin-bottom: 0;
 }
-.suggestions-summary .card-title {
-  margin-bottom: 0;
+
+.suggestion-another:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
