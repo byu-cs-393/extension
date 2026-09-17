@@ -663,3 +663,25 @@ body {
 .untracked-item {
   color: var(--text-secondary);
 }
+
+/* ---- Suggested for you -------------------------------------------------
+   Practice beyond the assigned problems. Two lines per row: the problem
+   and its difficulty, then what it exercises underneath. No status mark —
+   there's nothing to tick off, so the row starts at the title.
+
+   Difficulty reuses .problem-diff, which was already defined here for the
+   three tiers and had no markup using it. */
+.problem.suggestion {
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  row-gap: 2px;
+  padding-block: 6px;
+}
+
+.suggestion-why {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  /* Tag names run long on a narrow window; wrapping beats clipping. */
+  overflow-wrap: anywhere;
+}

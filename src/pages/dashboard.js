@@ -5,6 +5,7 @@ import {
   dedupeSessions,
 } from "../data/keystroke-analysis.js";
 import { pendingAutoSubmissions } from "../data/auto-submit.js";
+import { suggestionsForWeek } from "../data/week-suggestions.js";
 import { sendCanvasSubmission } from "../ui/submission-form.js";
 import {
   getVisibleWeeks,
@@ -52,6 +53,9 @@ let timerInterval = null;
 // initWeeks so the sync third-card dispatcher can render OA cards
 // without an async fetch mid-render.
 let currentOaShapes = {};
+// Suggested practice for the current week. Computed off the vendored
+// catalog and the student's own solves — no network, no API key.
+let currentSuggestions = [];
 let currentAssignmentProgress = {}; // { [assignmentId]: doc }
 // Keystroke session METADATA only — enough for per-week active time
 // without pulling every session's events.
@@ -153,6 +157,10 @@ function createWeekSection(cards, status) {
   section.appendChild(header);
 
   section.appendChild(createRecommendedCard(cards, status));
+
+  if (status === "current" && currentSuggestions.length > 0) {
+    section.appendChild(createSuggestionsCard(currentSuggestions));
+  }
 
   for (const item of cards.performanceItems ?? []) {
     const cardEl = createThirdCardSection(
@@ -364,6 +372,90 @@ function createUntrackedItem(item) {
   return li;
 }
 
+// Recompute the current week's suggestions and repaint.
+//
+// Deliberately never throws into the caller: suggestions are a bonus, and
+// a missing catalog or an odd week shouldn't cost the student their
+// dashboard.
+async function refreshSuggestions() {
+  const current = currentCards.find((c) => classifyWeek(c) === "current");
+  if (!current?.topic?.id) {
+    currentSuggestions = [];
+    return;
+  }
+  try {
+    currentSuggestions = await suggestionsForWeek({
+      topicId: current.topic.id,
+      solves: currentSolves?.solves ?? {},
+      limit: 4,
+    });
+  } catch (error) {
+    console.error("[CS 393 Buddy] couldn't build suggestions:", error);
+    currentSuggestions = [];
+  }
+  renderWeeks();
+}
+
+// Practice beyond the assigned problems.
+//
+// This fills the `outside` slot in course.json, which in most weeks just
+// says "do 4 other problems" and names none. Every pick is something the
+// student hasn't solved and the course doesn't assign in ANY week — the
+// later online assessments are all in course.json, and suggesting one
+// would hand out an assessment early.
+function createSuggestionsCard(picks) {
+  const article = document.createElement("article");
+  article.className = "card";
+
+  const title = document.createElement("div");
+  title.className = "card-title";
+  title.textContent = "Suggested for you";
+  article.appendChild(title);
+
+  const blurb = document.createElement("div");
+  blurb.className = "card-detail";
+  blurb.textContent =
+    "Extra practice on this week's topic, picked from problems you haven't solved.";
+  article.appendChild(blurb);
+
+  const list = document.createElement("ul");
+  list.className = "card-list problem-list";
+  for (const pick of picks) list.appendChild(createSuggestionItem(pick));
+  article.appendChild(list);
+
+  return article;
+}
+
+function createSuggestionItem(pick) {
+  const li = document.createElement("li");
+  li.className = "problem pending suggestion";
+
+  const link = document.createElement("a");
+  link.className = "problem-link";
+  link.href = `https://leetcode.com/problems/${pick.slug}/`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = pick.title;
+
+  const difficulty = document.createElement("span");
+  difficulty.className = `problem-diff diff-${pick.difficulty.toLowerCase()}`;
+  difficulty.textContent = pick.difficulty;
+
+  li.append(link, difficulty);
+
+  // What the problem exercises, in the course's own vocabulary. Stands in
+  // for the one-line reason a model will write here once the course has an
+  // API key — until then, saying WHY it was picked still beats a bare list.
+  const why = pick.matchedTopics?.slice(0, 3).join(" · ");
+  if (why) {
+    const reason = document.createElement("div");
+    reason.className = "suggestion-why";
+    reason.textContent = why;
+    li.appendChild(reason);
+  }
+  return li;
+}
+
 function createProblemItem(p, isSolved) {
   const li = document.createElement("li");
   li.className = `problem ${isSolved ? "complete" : "pending"}`;
@@ -532,6 +624,9 @@ async function initWeeks(netID) {
   );
   currentOaShapes = Object.fromEntries(oaEntries);
   renderWeeks();
+  // After the first paint: scoring 3,000-odd problems is quick, but the
+  // week should be on screen before it runs.
+  refreshSuggestions();
   startTimerLoop();
   // After the first paint, so a slow Canvas round-trip never delays the
   // dashboard appearing.
@@ -630,6 +725,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     currentSolves = changes.solvedProblems.newValue ?? null;
     needsRender = true;
     maybeAutoPass();
+    // A solved problem drops out of the suggestions, so they're stale now.
+    refreshSuggestions();
     // A solve landing means the student was just on LeetCode, so their
     // keystroke sessions have moved on too. Without this the tracked
     // time in a Weekly Study submission is whatever it was when the
