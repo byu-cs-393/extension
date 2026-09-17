@@ -1,6 +1,6 @@
 # Installing CS 393 Buddy
 
-**Version 1.0.6**
+**Version 1.0.7**
 
 Ten minutes, once. You'll need Chrome (or Edge/Brave — anything
 Chromium-based) and your BYU Canvas login.
