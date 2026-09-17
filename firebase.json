@@ -78,6 +78,13 @@
           "serviceId": "suggestproblems",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/gradeSignoff",
+        "run": {
+          "serviceId": "gradesignoff",
+          "region": "us-central1"
+        }
       }
     ]
   }

@@ -47,6 +47,7 @@ const {
   normalizeCode,
   submissionMatchesCode,
 } = require("./connect-code.js");
+const { SIGNOFF_TYPES, signoffScore } = require("./signoff-grade.js");
 
 // netID: starts with a lowercase letter, then up to 15 letters/digits.
 const NETID_REGEX = /^[a-z][a-z0-9]{1,15}$/;
@@ -1706,6 +1707,170 @@ async function logRun(db, runId, doc) {
   }
 }
 
+
+// ============================================================================
+// gradeSignoff — a TA's Pass becomes a grade and a comment in Canvas
+// ============================================================================
+//
+// The course token cannot create a submission for a student (it lacks
+// become_user, and Canvas reserves authorship to the author). It CAN grade
+// and comment, which are ordinary TA actions on a student's record. So a
+// signoff is recorded in Canvas the way a TA would record it by hand:
+//
+//   posted_grade        the score — see signoff-grade.js
+//   comment             the full text the student's submission would hold,
+//                       so the record carries the details even before the
+//                       student's own browser submits it
+//   late_policy_status  "none", clearing the Missing label an unsubmitted
+//                       assignment otherwise shows beside a real grade
+//
+// The student's browser later creates the actual submission from its own
+// Canvas session (see the canvas-submitter content script). This grade is
+// the floor: the student has credit even if that never happens.
+//
+// Request (POST, application/json), TA only:
+//   { forNetID, assignmentId, outcome, graderRating?, commentText }
+exports.gradeSignoff = onRequest(
+  { secrets: [canvasToken], region: "us-central1", cors: true },
+  async (req, res) => {
+    const origin = req.get("origin") ?? "*";
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Max-Age", "3600");
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST.", code: "method-not-allowed" });
+      return;
+    }
+
+    const authHeader = req.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing Bearer token.", code: "unauthenticated" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch (_err) {
+      res.status(401).json({ error: "Invalid ID token.", code: "unauthenticated" });
+      return;
+    }
+
+    // The only gate that matters. Grading is a TA action; a student token
+    // carries no role claim, so nothing a student sends can reach Canvas's
+    // gradebook through here.
+    if (decoded.role !== "ta") {
+      res.status(403).json({ error: "Only a TA can record a signoff grade.", code: "permission-denied" });
+      return;
+    }
+    const taNetID = decoded.uid;
+
+    const { forNetID, assignmentId, outcome, graderRating, commentText } = req.body ?? {};
+    if (typeof forNetID !== "string" || !NETID_REGEX.test(forNetID)) {
+      res.status(400).json({ error: "Invalid forNetID.", code: "invalid-argument" });
+      return;
+    }
+    if (outcome !== "passed" && outcome !== "failed") {
+      res.status(400).json({ error: "outcome must be passed or failed.", code: "invalid-argument" });
+      return;
+    }
+    const canvasAssignmentId = DEPLOY_MAP.assignments?.[assignmentId] ?? null;
+    if (!canvasAssignmentId) {
+      res.status(400).json({ error: `Unknown assignment ${assignmentId}.`, code: "invalid-argument" });
+      return;
+    }
+
+    const db = getFirestore();
+    const runId = `grade-${Date.now()}-${forNetID}-${assignmentId}`;
+    const log = (doc) => logRun(db, runId, { runId, taNetID, forNetID, assignmentId, canvasAssignmentId, ...doc, finishedAt: Date.now() });
+
+    // The type comes from the student's progress doc, not the request, so
+    // a caller can't relabel a study assignment as a signoff to grade it.
+    const progressSnap = await db.doc(`students/${forNetID}/assignmentProgress/${assignmentId}`).get();
+    const type = progressSnap.exists ? progressSnap.data()?.type : null;
+    if (!SIGNOFF_TYPES.has(type)) {
+      await log({ outcome: "skipped-not-signoff", type: type ?? null });
+      res.status(200).json({ outcome: "skipped-not-signoff", runId });
+      return;
+    }
+    if (outcome !== "passed") {
+      await log({ outcome: "skipped-not-passed", type });
+      res.status(200).json({ outcome: "skipped-not-passed", runId });
+      return;
+    }
+
+    // Whose record: Canvas's roster, never a Firestore field.
+    let rosterHit;
+    try {
+      rosterHit = await findEnrolledUser(forNetID, CS_393_COURSE_ID, canvasToken.value());
+    } catch (err) {
+      console.error(`[gradeSignoff] roster lookup failed for ${forNetID}:`, err);
+      res.status(502).json({ error: "Canvas roster lookup failed.", code: "canvas-unavailable" });
+      return;
+    }
+    if (!rosterHit) {
+      await log({ outcome: "skipped-not-enrolled", type });
+      res.status(200).json({ outcome: "skipped-not-enrolled", runId });
+      return;
+    }
+    const canvasUserId = Number(rosterHit.id);
+
+    const auth = { Authorization: `Bearer ${canvasToken.value()}`, Accept: "application/json" };
+    const base = `${CANVAS_BASE}/api/v1/courses/${CS_393_COURSE_ID}/assignments/${canvasAssignmentId}`;
+
+    // Points from Canvas itself, so the score can't drift from what the
+    // assignment is actually worth if the professor changes it.
+    let pointsPossible;
+    try {
+      const a = await fetch(base, { headers: auth });
+      if (!a.ok) throw new Error(`HTTP ${a.status}`);
+      pointsPossible = (await a.json())?.points_possible;
+    } catch (err) {
+      console.error(`[gradeSignoff] assignment read failed for ${assignmentId}:`, err);
+      res.status(502).json({ error: "Canvas assignment read failed.", code: "canvas-unavailable" });
+      return;
+    }
+
+    const score = signoffScore({ type, outcome, graderRating, pointsPossible });
+    if (score === null) {
+      await log({ outcome: "skipped-no-score", type, graderRating: graderRating ?? null, pointsPossible });
+      res.status(400).json({ error: "Could not derive a score for this signoff.", code: "invalid-argument", runId });
+      return;
+    }
+
+    const form = new URLSearchParams();
+    form.set("submission[posted_grade]", String(score));
+    form.set("submission[late_policy_status]", "none");
+    if (typeof commentText === "string" && commentText.trim()) {
+      form.set("comment[text_comment]", commentText.slice(0, 20000));
+    }
+
+    let canvasStatus = 0;
+    let canvasError = null;
+    try {
+      const resp = await fetch(`${base}/submissions/${canvasUserId}`, {
+        method: "PUT",
+        headers: { ...auth, "Content-Type": "application/x-www-form-urlencoded" },
+        body: form,
+      });
+      canvasStatus = resp.status;
+      if (!resp.ok) {
+        const raw = await resp.text();
+        try { canvasError = JSON.parse(raw)?.errors ?? raw; } catch { canvasError = raw; }
+      }
+    } catch (err) {
+      canvasError = err.message ?? String(err);
+    }
+
+    const ok = canvasStatus >= 200 && canvasStatus < 300;
+    const out = { outcome: ok ? "graded" : "canvas-error", type, score, canvasUserId, canvasStatus, canvasError };
+    await log(out);
+    if (!ok) console.error(`[gradeSignoff] Canvas PUT failed for ${forNetID}/${assignmentId}:`, canvasStatus, canvasError);
+    res.status(ok ? 200 : 502).json({ ...out, runId });
+  },
+);
 
 // ---- Problem suggestions -------------------------------------------------
 //
