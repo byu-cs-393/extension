@@ -355,6 +355,9 @@ async function applyDecision(item, outcome, passBtn, failBtn) {
       }
       const progress = await recordSignoffDecision({
         studentNetID: item.netID,
+        // The student's real document, loaded with the signoff queue —
+        // never this TA's own cache.
+        studentProgress: item.progress,
         taNetID: await getCurrentTaNetID(),
         assignmentId: item.assignmentId,
         outcome,

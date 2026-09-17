@@ -144,6 +144,10 @@ export async function recordSignoffDecision({
   // client sends.
   signoffHowLong, // performance exam: how long it took
   signoffHowItWent, // live interview: the TA's summary
+  // The student's own progress doc as the TA dashboard loaded it from
+  // Firestore. The decision is merged onto THIS to describe the document
+  // after the write — see the note at the end of this function.
+  studentProgress,
 }) {
   const path = `students/${studentNetID}/assignmentProgress/${assignmentId}`;
   const now = Date.now();
@@ -160,15 +164,25 @@ export async function recordSignoffDecision({
     ...(signoffHowItWent ? { signoffHowItWent } : {}),
   };
   await patchDoc(path, newDoc);
-  // Return the merged document rather than the patch.
+  // Return the student's document as it now stands: their Firestore doc
+  // with this decision merged on. Not the patch alone, which lacks `type`
+  // and `weekNum` (set when the doc was created) — autoSubmission checks
+  // `type` first, and a bare patch failed it silently.
   //
-  // newDoc is only the fields this write touches — it has no `type` and
-  // no `weekNum`, because those were set when the document was created.
-  // Returning it meant the TA dashboard called autoSubmission() with a
-  // doc whose `type` was undefined, which failed the very first check
-  // and returned null. submitForStudent then bailed without logging, so
-  // every TA pass-off silently failed to reach Canvas, and it only ever
-  // worked from the student's own dashboard — which reads the full
-  // document, type included.
-  return patchLocalCache(assignmentId, newDoc);
+  // And NOT the local cache. This used to merge onto chrome.storage.local,
+  // which belongs to whoever's browser runs it — always the TA's, since
+  // only the TA dashboard records decisions. That cache is keyed by
+  // assignment id alone, with no student in the key, so a TA passing
+  // Catherine on perf-data-structures merged her signoff onto the TA's OWN
+  // perf-data-structures entry. autoSubmission then judged a hybrid of two
+  // people. It also wrote that hybrid back into the TA's cache, where the
+  // TA's own dashboard saw a passed, unsubmitted exam "for them" and
+  // queued it onto the TA's record. The next student passed on the same
+  // assignment inherited that queued item, autoSubmission treated them as
+  // already pending, and nothing reached Canvas — which is why the second
+  // pass-off on an assignment failed after the first appeared to work.
+  //
+  // A student's decision never belongs in the TA's cache, so nothing is
+  // written there at all.
+  return { ...(studentProgress ?? {}), ...newDoc };
 }

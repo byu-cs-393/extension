@@ -184,6 +184,40 @@ describe("drain tabs", () => {
   });
 });
 
+// A token whose payload carries the given role, as auth.js decodes it.
+const tokenWithRole = (role) =>
+  `h.${Buffer.from(JSON.stringify({ role })).toString("base64url")}.s`;
+
+describe("a TA's own browser", () => {
+  // Canvas refuses submissions from teaching roles, so anything queued on a
+  // TA's record can never send. Handing it out would retry — and fail — on
+  // every Canvas page the TA opens.
+  it("hands out nothing, even with items queued on its record", async () => {
+    docs["perf-data-structures"] = pendingDoc("perf-data-structures", 1000);
+    const areas = installChrome();
+    areas.local.firebaseAuth = { idToken: tokenWithRole("ta") };
+    const { routeOutboxMessage } = await freshWorker();
+    expect((await send(routeOutboxMessage, { type: "canvasOutbox:list" })).items).toEqual([]);
+  });
+
+  it("does not open a drain tab for a TA", async () => {
+    docs["perf-data-structures"] = pendingDoc("perf-data-structures", 1000);
+    const areas = installChrome();
+    areas.local.firebaseAuth = { idToken: tokenWithRole("ta") };
+    const { routeOutboxMessage } = await freshWorker();
+    expect((await send(routeOutboxMessage, { type: "canvasOutbox:drain" })).opened).toBe(false);
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it("still sends for a student", async () => {
+    docs["perf-graphs"] = pendingDoc("perf-graphs", 1000);
+    const areas = installChrome();
+    areas.local.firebaseAuth = { idToken: tokenWithRole(undefined) };
+    const { routeOutboxMessage } = await freshWorker();
+    expect((await send(routeOutboxMessage, { type: "canvasOutbox:list" })).items).toHaveLength(1);
+  });
+});
+
 it("ignores messages that aren't its own", async () => {
   const { routeOutboxMessage } = await freshWorker();
   expect(routeOutboxMessage({ type: "pushMyRecentGrade" }, {}, () => {})).toBe(false);

@@ -9,6 +9,7 @@
 //   canvasOutbox:done         a drain finished — close the tab we opened
 //   canvasOutbox:drain        from an extension page — send now if we can
 import { fetchCollection, fetchDoc, patchDoc } from "./firestore.js";
+import { getRole } from "./auth.js";
 import { fillSubmissionTemplate } from "../data/submission-templates.js";
 import {
   pendingSubmissions,
@@ -64,6 +65,13 @@ async function currentNetID() {
 async function listPending() {
   const netID = await currentNetID();
   if (!netID) return [];
+  // Canvas refuses a submission from anyone with a teaching role, so
+  // anything queued on a TA's own record can never send. Without this it
+  // would be retried — and refused — on every Canvas page the TA opens,
+  // indefinitely. A TA's record only acquired queued items through the
+  // cache bug fixed in recordSignoffDecision, but existing ones linger
+  // until cleared, and this stops them spinning in the meantime.
+  if ((await getRole()) === "ta") return [];
   const docs = await fetchCollection(`students/${netID}/assignmentProgress`);
   const byId = Object.fromEntries(docs.map((d) => [d.assignmentId, d]));
   return pendingSubmissions(byId);
