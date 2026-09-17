@@ -94,6 +94,33 @@ async function findEnrolledUser(netID, courseId, token) {
   return null;
 }
 
+// The whole course roster as netID -> Canvas user id, fetched once.
+//
+// For batch jobs. Calling findEnrolledUser per student would re-read
+// every page of the roster for every student — quadratic in class size.
+async function fetchRosterIdMap(courseId, token) {
+  const auth = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  const ids = new Map();
+  let url =
+    `${CANVAS_BASE}/api/v1/courses/${courseId}/users` +
+    `?enrollment_type[]=student&enrollment_type[]=ta&enrollment_type[]=teacher` +
+    `&per_page=100`;
+  while (url) {
+    const resp = await fetch(url, { headers: auth });
+    if (!resp.ok) {
+      throw new Error(`Canvas roster ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    }
+    const users = await resp.json();
+    if (!Array.isArray(users)) throw new Error("Canvas roster: unexpected response shape");
+    for (const u of users) {
+      const login = String(u?.login_id ?? "").toLowerCase();
+      if (login && Number.isFinite(Number(u?.id))) ids.set(login, Number(u.id));
+    }
+    url = nextPageUrl(resp.headers.get("link"));
+  }
+  return ids;
+}
+
 // Canvas paginates with an RFC 5988 Link header. Without following it a
 // roster read silently stops at 100 people, and student 101 gets told
 // they aren't enrolled.
@@ -782,6 +809,9 @@ async function runPushCanvasGrades({ triggeredBy, trigger, token }) {
     thirdCard: { ok: 0, skippedNoAssignment: 0, skippedNoUser: 0, skippedNoCard: 0, failed: 0 },
   };
 
+  // Resolved from Canvas once for the whole run. See the note in the loop.
+  const rosterIds = await fetchRosterIdMap(CS_393_COURSE_ID, token);
+
   for (const studentDoc of studentsSnap.docs) {
     const netID = studentDoc.id;
     const student = studentDoc.data();
@@ -789,7 +819,16 @@ async function runPushCanvasGrades({ triggeredBy, trigger, token }) {
       student?.solvedProblems && typeof student.solvedProblems === "object"
         ? student.solvedProblems
         : {};
-    const canvasUserId = student?.canvasUserId ?? null;
+    // NEVER read canvasUserId from the student's Firestore doc here.
+    //
+    // Firestore rules let a student write that field on their own doc, and
+    // this id decides WHOSE Canvas record the grade lands on. Trusting it
+    // meant a student could set their canvasUserId to a classmate's and
+    // have their grade written onto the classmate's record — grade
+    // tampering across students, through a permission (manage_grades)
+    // that genuinely works. Canvas's own roster is the only authority on
+    // which Canvas account a netID belongs to.
+    const canvasUserId = rosterIds.get(netID.toLowerCase()) ?? null;
     const progressByWeek = progressByStudent[netID] ?? {};
     results[netID] = {};
 
@@ -1117,7 +1156,25 @@ exports.pushMyRecentGrade = onRequest(
       return;
     }
     const student = studentSnap.data();
-    const canvasUserId = student?.canvasUserId ?? null;
+    // NEVER read canvasUserId from the student's Firestore doc here.
+    //
+    // Firestore rules let a student write that field on their own doc, and
+    // this id decides WHOSE Canvas record the grade lands on. Trusting it
+    // meant a student could set their canvasUserId to a classmate's and
+    // have their grade written onto the classmate's record — grade
+    // tampering across students, through a permission (manage_grades)
+    // that genuinely works. Canvas's own roster is the only authority on
+    // which Canvas account a netID belongs to.
+    let rosterHit = null;
+    try {
+      rosterHit = await findEnrolledUser(netID, CS_393_COURSE_ID, canvasToken.value());
+    } catch (err) {
+      // A roster outage must not become a 500 with no record of why.
+      console.error(`[roster] lookup failed for ${netID}:`, err);
+      res.status(502).json({ error: "Canvas roster lookup failed.", code: "canvas-unavailable" });
+      return;
+    }
+    const canvasUserId = rosterHit ? Number(rosterHit.id) : null;
     const solves =
       student?.solvedProblems && typeof student.solvedProblems === "object"
         ? student.solvedProblems
@@ -1553,7 +1610,25 @@ exports.submitCanvasAssignment = onRequest(
       res.status(200).json(out);
       return;
     }
-    const canvasUserId = studentSnap.data()?.canvasUserId ?? null;
+    // NEVER read canvasUserId from the student's Firestore doc here.
+    //
+    // Firestore rules let a student write that field on their own doc, and
+    // this id decides WHOSE Canvas record the grade lands on. Trusting it
+    // meant a student could set their canvasUserId to a classmate's and
+    // have their grade written onto the classmate's record — grade
+    // tampering across students, through a permission (manage_grades)
+    // that genuinely works. Canvas's own roster is the only authority on
+    // which Canvas account a netID belongs to.
+    let rosterHit = null;
+    try {
+      rosterHit = await findEnrolledUser(netID, CS_393_COURSE_ID, canvasToken.value());
+    } catch (err) {
+      // A roster outage must not become a 500 with no record of why.
+      console.error(`[roster] lookup failed for ${netID}:`, err);
+      res.status(502).json({ error: "Canvas roster lookup failed.", code: "canvas-unavailable" });
+      return;
+    }
+    const canvasUserId = rosterHit ? Number(rosterHit.id) : null;
     if (canvasUserId == null) {
       const out = {
         runId, netID, assignmentId, canvasAssignmentId,
