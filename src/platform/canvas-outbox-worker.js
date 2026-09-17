@@ -62,23 +62,31 @@ async function currentNetID() {
   return typeof netID === "string" && netID ? netID : null;
 }
 
+// Returns { queue, anyRequested }. anyRequested means this student has a
+// signoff waiting on a TA — the only situation where something can appear
+// in their queue while they sit on a Canvas page. The content script uses
+// it to decide whether polling is worth a Firestore read; most students
+// never have one open, so most never poll.
 async function listPending() {
   const netID = await currentNetID();
-  if (!netID) return [];
+  if (!netID) return { queue: [], anyRequested: false };
   // Canvas refuses a submission from anyone with a teaching role, so
   // anything queued on a TA's own record can never send. Without this it
   // would be retried — and refused — on every Canvas page the TA opens,
   // indefinitely. A TA's record only acquired queued items through the
   // cache bug fixed in recordSignoffDecision, but existing ones linger
   // until cleared, and this stops them spinning in the meantime.
-  if ((await getRole()) === "ta") return [];
+  if ((await getRole()) === "ta") return { queue: [], anyRequested: false };
   const docs = await fetchCollection(`students/${netID}/assignmentProgress`);
   const byId = Object.fromEntries(docs.map((d) => [d.assignmentId, d]));
-  return pendingSubmissions(byId);
+  return {
+    queue: pendingSubmissions(byId),
+    anyRequested: docs.some((d) => d?.status === "requested"),
+  };
 }
 
 async function handleList() {
-  const [queue, map] = await Promise.all([listPending(), loadDeployMap()]);
+  const [{ queue, anyRequested }, map] = await Promise.all([listPending(), loadDeployMap()]);
   const claimed = await claimUnclaimed(queue.map((q) => keyFor(q.assignmentId, q.queuedAt)));
   const items = [];
   for (const q of queue) {
@@ -105,7 +113,7 @@ async function handleList() {
       }),
     });
   }
-  return { items };
+  return { items, pollAdvised: anyRequested };
 }
 
 async function handleResult(message) {
@@ -165,7 +173,7 @@ async function drainTabs() {
 }
 
 async function handleDrain() {
-  const pending = await listPending();
+  const { queue: pending } = await listPending();
   if (pending.length === 0) return { opened: false, pending: 0 };
   const tab = await chrome.tabs.create({ url: CANVAS_HOME, active: false });
   const tabs = await drainTabs();

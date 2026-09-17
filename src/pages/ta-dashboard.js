@@ -447,6 +447,26 @@ async function submitForStudent(item, progress) {
     data: submission.data,
   });
 
+  // Both at once, on purpose.
+  //
+  // Queueing is a single Firestore write; grading is several Canvas round
+  // trips (roster lookup, points, the grade itself) and can be slow on a
+  // cold start. Run in sequence with grading first, the queue record didn't
+  // exist until seconds after the Pass — so a student refreshing Canvas
+  // right away found nothing pending and never looked again. Started
+  // together, the record is there within a fraction of a second.
+  //
+  // Neither rejects: each reports its own failure, and one failing must not
+  // take the other down. The grade is the student's credit; the queue is
+  // their submission. They're independent.
+  await Promise.all([
+    queueForStudent(item, submission),
+    gradeInCanvas(item, submission, progress, body),
+  ]);
+}
+
+// Puts the grade in Canvas now, with the submission text as a comment.
+async function gradeInCanvas(item, submission, progress, body) {
   try {
     const idToken = await getIdToken();
     const resp = await fetch(GRADE_SIGNOFF_URL, {
@@ -474,7 +494,11 @@ async function submitForStudent(item, progress) {
   } catch (err) {
     console.error("[CS 393 Buddy] grade-signoff threw:", err);
   }
+}
 
+// Records the submission on the student's own document, for their browser
+// to send from their Canvas session.
+async function queueForStudent(item, submission) {
   try {
     const queued = await sendCanvasSubmission({
       type: submission.type,

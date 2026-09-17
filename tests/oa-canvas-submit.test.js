@@ -192,6 +192,42 @@ describe("what the OA move depends on", () => {
     expect(body).toContain("two-sum");
   });
 
+  // A page load alone misses the student sitting on a Canvas page while a
+  // TA signs them off — nothing reloads, so nothing re-checks.
+  it("re-checks when the tab comes back or while it's visible", () => {
+    const script = read("src/content/canvas-submitter.js");
+    expect(script).toMatch(/addEventListener\("visibilitychange"/);
+    expect(script).toMatch(/addEventListener\("focus"/);
+    expect(script).toMatch(/setInterval\(/);
+  });
+
+  it("throttles re-checks and won't overlap two runs", () => {
+    const script = read("src/content/canvas-submitter.js");
+    expect(script).toMatch(/if \(running \|\| Date\.now\(\) - lastRunAt < MIN_GAP_MS\) return;/);
+  });
+
+  it("only polls when the background says a signoff is awaiting a TA", () => {
+    const script = read("src/content/canvas-submitter.js");
+    expect(script).toMatch(/setPolling\(listing\?\.pollAdvised === true\)/);
+  });
+
+  // Queue and grade start together: the queue is one fast Firestore write,
+  // grading is several Canvas round trips. Sequential, a student refreshing
+  // Canvas right after a Pass found nothing to send.
+  it("queues the submission without waiting for the grade", () => {
+    const ta = read("src/pages/ta-dashboard.js");
+    const fn = ta.slice(
+      ta.indexOf("async function submitForStudent"),
+      ta.indexOf("async function gradeInCanvas"),
+    );
+    // Both started in one Promise.all, so neither waits on the other.
+    const call = fn.slice(fn.indexOf("await Promise.all(["));
+    expect(call).toMatch(/queueForStudent\(item, submission\)/);
+    expect(call).toMatch(/gradeInCanvas\(item, submission/);
+    // And the queue is not awaited on its own beforehand.
+    expect(fn).not.toMatch(/await queueForStudent/);
+  });
+
   // The whole point: nothing in the extension uses the masquerading route.
   it("leaves no client code sending the old server submission", () => {
     const { execSync } = require("node:child_process");

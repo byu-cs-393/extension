@@ -64,6 +64,10 @@ beforeEach(() => {
   installChrome();
 });
 
+// A token whose payload carries the given role, as auth.js decodes it.
+const tokenWithRole = (role) =>
+  `h.${Buffer.from(JSON.stringify({ role })).toString("base64url")}.s`;
+
 describe("canvasOutbox:list", () => {
   it("hands out rendered, ready-to-POST submissions", async () => {
     docs["perf-graphs"] = pendingDoc("perf-graphs", 1000);
@@ -111,6 +115,33 @@ describe("canvasOutbox:list", () => {
     docs["perf-graphs"] = pendingDoc("perf-graphs", 1000);
     const { routeOutboxMessage } = await freshWorker();
     expect((await send(routeOutboxMessage, { type: "canvasOutbox:list" })).items).toEqual([]);
+  });
+});
+
+describe("poll advice", () => {
+  // Polling costs a Firestore read each time, so it only runs for a student
+  // who has a signoff waiting on a TA — the one case where something can
+  // land in their queue while they sit on a Canvas page doing nothing.
+  it("advises polling when a signoff is awaiting a TA", async () => {
+    docs.pending = { assignmentId: "perf-graphs", type: "performance", status: "requested" };
+    const { routeOutboxMessage } = await freshWorker();
+    const res = await send(routeOutboxMessage, { type: "canvasOutbox:list" });
+    expect(res.pollAdvised).toBe(true);
+  });
+
+  it("does not advise polling when nothing is awaiting a TA", async () => {
+    docs.done = { assignmentId: "perf-graphs", type: "performance", status: "passed" };
+    const { routeOutboxMessage } = await freshWorker();
+    const res = await send(routeOutboxMessage, { type: "canvasOutbox:list" });
+    expect(res.pollAdvised).toBe(false);
+  });
+
+  it("never advises a TA to poll", async () => {
+    docs.pending = { assignmentId: "perf-graphs", type: "performance", status: "requested" };
+    const areas = installChrome();
+    areas.local.firebaseAuth = { idToken: tokenWithRole("ta") };
+    const { routeOutboxMessage } = await freshWorker();
+    expect((await send(routeOutboxMessage, { type: "canvasOutbox:list" })).pollAdvised).toBe(false);
   });
 });
 
@@ -183,10 +214,6 @@ describe("drain tabs", () => {
     expect(chrome.tabs.remove).not.toHaveBeenCalled();
   });
 });
-
-// A token whose payload carries the given role, as auth.js decodes it.
-const tokenWithRole = (role) =>
-  `h.${Buffer.from(JSON.stringify({ role })).toString("base64url")}.s`;
 
 describe("a TA's own browser", () => {
   // Canvas refuses submissions from teaching roles, so anything queued on a

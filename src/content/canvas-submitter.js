@@ -18,64 +18,113 @@
 // can come from — which is also the course rule that the extension only
 // ever does what a student could do by hand.
 
-(async () => {
-  let listing;
+// How the queue gets noticed. A page load alone isn't enough: a student
+// signed off while sitting on a Canvas page would never see it, because
+// nothing reloads. So three triggers, all running the same routine:
+//
+//   load        they just opened or refreshed a Canvas page
+//   focus       they came back to a Canvas tab they'd left
+//   poll        they're sitting on the page while a TA signs them off
+//
+// The poll only runs when the student has a signoff actually waiting on a
+// TA — the one case where something can appear in their queue without them
+// doing anything. Most students never have one, so most never poll.
+const MIN_GAP_MS = 10_000;
+const POLL_MS = 90_000;
+
+let lastRunAt = 0;
+let running = false;
+let pollTimer = null;
+
+async function drain() {
+  // Flipping between tabs shouldn't mean a Firestore read per flip, and two
+  // overlapping runs would ask for the same items twice.
+  if (running || Date.now() - lastRunAt < MIN_GAP_MS) return;
+  running = true;
+  lastRunAt = Date.now();
   try {
-    listing = await chrome.runtime.sendMessage({ type: "canvasOutbox:list" });
-  } catch {
-    // Extension reloaded or updated under this page. Nothing to do; the
-    // next page load will ask again.
-    return;
-  }
-  const items = listing?.items ?? [];
-  if (items.length === 0) return;
-
-  const csrf = readCsrfToken();
-  if (!csrf) {
-    // On a Canvas page but not logged in — the login screen, say. Tell the
-    // background so it can bring this tab forward for the student.
-    safeSend({ type: "canvasOutbox:notSignedIn", items: items.map(keyOf) });
-    return;
-  }
-
-  for (const item of items) {
-    let status = 0;
-    let submissionId = null;
-    let error = null;
-    try {
-      const resp = await fetch(
-        `/api/v1/courses/${item.courseId}/assignments/${item.canvasAssignmentId}/submissions`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            // Canvas rejects same-origin writes without this, exactly as it
-            // would for its own frontend.
-            "X-CSRF-Token": csrf,
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          },
-          body: new URLSearchParams(item.fields),
-        },
-      );
-      status = resp.status;
-      const json = await resp.json().catch(() => null);
-      if (resp.ok) submissionId = json?.id ?? null;
-      else error = json?.errors ?? json?.message ?? `HTTP ${status}`;
-    } catch (err) {
-      error = String(err?.message ?? err);
+    const listing = await safeSend({ type: "canvasOutbox:list" });
+    if (listing === null) {
+      // Extension reloaded under this page; nothing can reach it again.
+      stopPolling();
+      return;
     }
-    await safeSend({
-      type: "canvasOutbox:result",
-      ...keyOf(item),
-      ok: status >= 200 && status < 300,
-      status,
-      submissionId,
-      error,
-    });
+    setPolling(listing?.pollAdvised === true);
+
+    const items = listing?.items ?? [];
+    if (items.length === 0) return;
+
+    const csrf = readCsrfToken();
+    if (!csrf) {
+      // On a Canvas page but not logged in — the login screen, say. Tell the
+      // background so it can bring this tab forward for the student.
+      safeSend({ type: "canvasOutbox:notSignedIn", items: items.map(keyOf) });
+      return;
+    }
+
+    for (const item of items) {
+      let status = 0;
+      let submissionId = null;
+      let error = null;
+      try {
+        const resp = await fetch(
+          `/api/v1/courses/${item.courseId}/assignments/${item.canvasAssignmentId}/submissions`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              // Canvas rejects same-origin writes without this, exactly as it
+              // would for its own frontend.
+              "X-CSRF-Token": csrf,
+              "Content-Type": "application/x-www-form-urlencoded",
+              Accept: "application/json",
+            },
+            body: new URLSearchParams(item.fields),
+          },
+        );
+        status = resp.status;
+        const json = await resp.json().catch(() => null);
+        if (resp.ok) submissionId = json?.id ?? null;
+        else error = json?.errors ?? json?.message ?? `HTTP ${status}`;
+      } catch (err) {
+        error = String(err?.message ?? err);
+      }
+      await safeSend({
+        type: "canvasOutbox:result",
+        ...keyOf(item),
+        ok: status >= 200 && status < 300,
+        status,
+        submissionId,
+        error,
+      });
+    }
+    safeSend({ type: "canvasOutbox:done" });
+  } finally {
+    running = false;
   }
-  safeSend({ type: "canvasOutbox:done" });
-})();
+}
+
+function setPolling(on) {
+  if (on === Boolean(pollTimer)) return;
+  if (!on) return stopPolling();
+  pollTimer = setInterval(() => {
+    if (document.visibilityState === "visible") drain();
+  }, POLL_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+// visibilitychange covers switching browser tabs; focus covers switching
+// away from the browser entirely. Neither fires reliably for both.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") drain();
+});
+window.addEventListener("focus", () => drain());
+
+drain();
 
 function keyOf(item) {
   return { assignmentId: item.assignmentId, queuedAt: item.queuedAt };
