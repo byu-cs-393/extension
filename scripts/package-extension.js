@@ -41,6 +41,7 @@ const SHIP = [
   "manifest.json",
   "course.json",
   "leetcode-catalog.json",   // the pool suggestions are drawn from
+  "deploy.fall-2026.json",   // stable id -> Canvas id, for in-browser submission
   "icons",
   "generated",   // bundled content scripts (manifest points here)
   "pages",       // one entry point per HTML page

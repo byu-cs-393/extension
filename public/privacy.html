@@ -37,7 +37,7 @@
   </head>
   <body>
     <h1>CS 393 Buddy — Privacy Policy</h1>
-    <p class="updated">Last updated 10 September 2026</p>
+    <p class="updated">Last updated 17 September 2026</p>
 
     <p>
       CS 393 Buddy is a Chrome extension built for one course: BYU CS 393,
@@ -50,8 +50,9 @@
       <strong>The short version.</strong> On LeetCode problem pages, the
       extension records what you type in the code editor, what you paste and
       copy, and when the tab is in the foreground. Your instructor and TAs can
-      see it. It records nothing on any other website — including Canvas,
-      where it runs no code at all.
+      see it. It records nothing on any other website. On Canvas it does one
+      thing — submits your coursework, as you — and never reads the pages you
+      visit.
     </div>
 
     <h2>What is collected</h2>
@@ -108,21 +109,53 @@
         elsewhere.
       </li>
       <li>
-        <strong>Anything on Canvas.</strong> The extension runs no code on
-        byu.instructure.com and Chrome does not grant it access there. It
-        cannot read your grades, your messages, your other courses, or your
-        Canvas session.
+        <strong>Anything you see on Canvas.</strong> The extension does not read
+        Canvas pages, your grades, your messages, your other courses, or who
+        you are signed in as. See <a href="#canvas">what it does on Canvas</a>
+        for the one thing it does there.
       </li>
       <li>Your Canvas or LeetCode password. The extension never sees either.</li>
       <li>Anything while the extension is removed or disabled.</li>
     </ul>
 
+    <h2 id="canvas">What it does on Canvas</h2>
+    <p>
+      One thing: it submits your coursework to Canvas, as you, from your own
+      signed-in session.
+    </p>
+    <p>
+      It has to work this way. The course cannot submit an assignment on a
+      student's behalf — Canvas only accepts a submission from the student who
+      is making it. So when there is something to submit, the extension sends
+      it from your browser the next time you are on Canvas, exactly as if you
+      had pasted it in and pressed Submit yourself. It can only do what you
+      could do by hand.
+    </p>
+    <p>
+      Concretely, on a Canvas page it asks the extension once whether anything
+      is waiting to be submitted. If nothing is, it stops. If something is, it
+      sends that submission and nothing else. It does not read the page, look
+      at your grades or messages, or touch any other course.
+    </p>
+    <p>
+      If you submit something from the extension while you are not already on
+      Canvas, a Canvas tab may open briefly in the background to send it and
+      then close. If you are signed out, that tab stays open so you can sign
+      in.
+    </p>
+    <p>
+      When a TA signs you off on an exam or interview, the TA also records the
+      grade in Canvas directly, with the details attached as a comment. Only
+      teaching staff can do that; nothing you do in the extension can change a
+      grade.
+    </p>
+
     <h2 id="identity">How onboarding verifies you</h2>
     <p>
       The extension has to know which Canvas account is yours, and it cannot
       simply trust what it is told — it runs on your computer, where anything
-      it reports could be altered. Earlier versions read your identity from
-      your signed-in Canvas session. That access has been removed.
+      it reports could be altered. The extension does not read who you are
+      signed in to Canvas as.
     </p>
     <p>
       Instead, onboarding shows you a randomly generated code. You paste it

@@ -15,6 +15,7 @@
 //      bypass, so it can call our Cloud Functions freely. See the
 //      onMessage handler below.
 import { forceRefresh, getIdToken } from "./auth.js";
+import { routeOutboxMessage } from "./canvas-outbox-worker.js";
 
 const PUSH_MY_RECENT_GRADE_URL =
   "https://cs393-496021.web.app/api/pushMyRecentGrade";
@@ -60,6 +61,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // asynchronously — otherwise Chrome closes the message channel before
 // sendResponse fires.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // In-browser Canvas submission. See canvas-outbox-worker.js.
+  if (routeOutboxMessage(message, sender, sendResponse)) return true;
+
   if (message?.type === "pushMyRecentGrade") {
     (async () => {
       try {

@@ -61,6 +61,15 @@
         "generated/keystroke-tracker.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://byu.instructure.com/*"
+      ],
+      "js": [
+        "generated/canvas-submitter.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

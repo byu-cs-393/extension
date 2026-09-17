@@ -80,11 +80,23 @@ While you're on `leetcode.com/problems/...`, the extension records:
 It does **not** record anything outside LeetCode problem pages. Not other
 sites, not other tabs, not your clipboard when you're elsewhere.
 
-**It runs no code on Canvas at all.** Chrome will not ask you to grant it
-access to byu.instructure.com, because it doesn't have any — everything
-it does with Canvas happens on the course's server, using the course's
-own credentials. That's why onboarding asks you to paste a code instead
-of just reading who you're signed in as.
+**On Canvas it does one thing: submits your coursework, as you.** Canvas
+only accepts a submission from the student making it, so the extension
+sends yours from your own signed-in browser — exactly what pressing Submit
+yourself would do. It doesn't read Canvas pages, your grades, your
+messages, or who you're signed in as. That's why onboarding asks you to
+paste a code instead of reading your identity from Canvas.
+
+Chrome will say the extension can access byu.instructure.com. That's the
+permission to send submissions from there; it's used for nothing else.
+
+If you submit something while you're not on Canvas, a Canvas tab may open
+briefly in the background and close again — that's the submission being
+sent. If you're signed out, the tab stays open so you can sign in.
+
+When a TA signs you off on an exam or interview, your grade goes into
+Canvas right away. The submission itself follows the next time you're on
+Canvas, so don't worry if it takes a little while to appear.
 
 Your instructor and TAs can see this. It's how weekly study time gets
 verified and how a TA can look at your work with you.

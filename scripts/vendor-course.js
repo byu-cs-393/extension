@@ -33,6 +33,11 @@ const COURSE_REPO = process.env.COURSE_REPO || path.resolve(REPO_ROOT, "..", "co
 const VENDOR_MAP = [
   ["data/course.json", "src/course.json"],
   ["build/deploy.fall-2026.json", "functions/deploy.fall-2026.json"],
+  // Also shipped in the extension: the student's own browser now creates
+  // Canvas submissions, and it needs to know which Canvas assignment each
+  // stable id maps to. Canvas ids aren't secret — they're in every
+  // assignment URL a student already sees.
+  ["build/deploy.fall-2026.json", "src/deploy.fall-2026.json"],
 ];
 
 let allOk = true;

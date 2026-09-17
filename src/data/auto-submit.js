@@ -1,3 +1,4 @@
+import { isPending } from "./canvas-outbox.js";
 // Deciding which TA-approved assignments should submit themselves.
 //
 // Performance exams and live interviews used to leave a "Submit to
@@ -40,6 +41,10 @@ export function autoSubmission(progress) {
   if (!progress || !isAutoSubmitType(progress.type)) return null;
   if (!progress.assignmentId) return null;
   if (progress?.status !== "passed") return null;
+  // Already queued for Canvas and waiting for the student's browser to send
+  // it. Queueing again would only rewrite the same record with a newer
+  // timestamp on every dashboard load.
+  if (isPending(progress)) return null;
   // Already sent for THIS signoff. Comparing timestamps rather than just
   // testing for a submission is what makes retakes work: a student who
   // fails, re-requests and passes again has a signoffAt newer than their

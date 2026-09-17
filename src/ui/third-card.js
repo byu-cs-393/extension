@@ -45,6 +45,7 @@ import { requestSignoff } from "../data/assignment-progress.js";
 import { fillOaTemplate } from "../data/submission-templates.js";
 import { openSubmissionForm } from "./submission-form.js";
 import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
+import { isPending } from "../data/canvas-outbox.js";
 
 const PROGRESS_CACHE_KEY = "weekProgressBundle";
 
@@ -406,22 +407,25 @@ function addDetail(article, text) {
 //
 // Deliberately NO submit button, not even as a fallback. A button here
 // reads as "you still have to do this", which is exactly the step being
-// removed — and it isn't needed, because auto-submit retries on every
-// dashboard load until canvasSubmittedAt is set. A Canvas outage delays
-// the submission; it can't strand it.
+// removed. The TA's Pass already put a grade in Canvas; the submission
+// itself is queued and sent from this browser the next time it's on
+// Canvas, so there's nothing for the student to press.
 function appendAutoSubmitState(article, progress) {
-  if (progress?.canvasSubmittedAt) {
-    const line = document.createElement("div");
-    line.className = "card-detail canvas-submit-receipt";
+  const line = document.createElement("div");
+  line.className = "card-detail";
+  if (progress?.canvasSubmittedAt && !isPending(progress)) {
+    line.classList.add("canvas-submit-receipt");
     line.textContent =
       `✓ Submitted to Canvas · ${formatRelativeTime(progress.canvasSubmittedAt)}`;
-    article.appendChild(line);
-    return;
+  } else if (isPending(progress)) {
+    // Worded around what the student does, not how it works. They don't
+    // need to know about content scripts — only that visiting Canvas is
+    // what completes it.
+    line.textContent = "Passed · submits next time you open Canvas";
+  } else {
+    line.textContent = "Passed · preparing Canvas submission…";
   }
-  const pending = document.createElement("div");
-  pending.className = "card-detail";
-  pending.textContent = "Submitting to Canvas…";
-  article.appendChild(pending);
+  article.appendChild(line);
 }
 
 // An out-of-extension link (Teams, docs). Opens in a new tab; noopener so

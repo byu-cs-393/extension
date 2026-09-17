@@ -7,7 +7,7 @@
 // MVP scope: signoff queue only. Struggling students and student
 // detail are placeholder tabs for now.
 
-import { getRole } from "../platform/auth.js";
+import { getRole, getIdToken } from "../platform/auth.js";
 import { fetchCollection, fetchDoc, patchDoc } from "../platform/firestore.js";
 import {
   getAllScheduleCards,
@@ -19,6 +19,7 @@ import { recordSignoffDecision } from "../data/assignment-progress.js";
 import { registerAsStaff } from "../data/staff.js";
 import { autoSubmission } from "../data/auto-submit.js";
 import { sendCanvasSubmission } from "../ui/submission-form.js";
+import { fillSubmissionTemplate } from "../data/submission-templates.js";
 import {
   fetchKeystrokeSessions,
   renderKeystrokeSection,
@@ -399,19 +400,30 @@ function promptForText(message) {
   return raw == null ? null : raw.trim();
 }
 
-// Sends the Canvas submission on the student's behalf. Best-effort: the
-// signoff is already recorded, and the student's dashboard will retry
-// this if it fails, so a Canvas hiccup must not make the Pass look like
-// it didn't take.
+const GRADE_SIGNOFF_URL = "https://cs393-496021.web.app/api/gradeSignoff";
+
+// Records a Pass in Canvas, in two parts.
+//
+//   1. GRADE, now, from the TA's session. The course token can grade and
+//      comment — ordinary TA actions — so the student has credit the moment
+//      they're signed off, with the full submission text attached as a
+//      comment and the Missing label cleared.
+//   2. SUBMISSION, later, from the student's own browser. The token can't
+//      create a submission as a student; only their own Canvas session can.
+//      It's queued on their record and sent the next time they're on Canvas.
+//
+// The grade is the floor. If the student never visits Canvas again, they
+// still have credit and a record of what happened.
+//
+// Best-effort throughout: the signoff is already recorded in Firestore, so a
+// Canvas failure must not make the Pass look like it didn't take.
 async function submitForStudent(item, progress) {
   const submission = autoSubmission(progress);
   if (!submission) {
-    // Never silent. A bare `return` here hid a bug where every pass-off
-    // failed to submit: autoSubmission rejected the progress doc, this
-    // returned, and the TA saw nothing to suggest Canvas hadn't been
-    // told. If it declines, say which condition and with what.
+    // Never silent. A bare return here once hid every pass-off failing to
+    // reach Canvas, because autoSubmission rejected the doc unseen.
     console.warn(
-      `[CS 393 Buddy] no Canvas submission for ${item.netID} / ${item.assignmentId} —`,
+      `[CS 393 Buddy] no Canvas record for ${item.netID} / ${item.assignmentId} —`,
       {
         type: progress?.type ?? "(missing)",
         status: progress?.status ?? "(missing)",
@@ -422,8 +434,46 @@ async function submitForStudent(item, progress) {
     );
     return;
   }
+
+  // The same text the student's browser will later submit — rendered by the
+  // same template from the same inputs — so the comment and the submission
+  // can't disagree.
+  const body = fillSubmissionTemplate({
+    type: submission.type,
+    assignmentId: submission.assignmentId,
+    data: submission.data,
+  });
+
   try {
-    const outcome = await sendCanvasSubmission({
+    const idToken = await getIdToken();
+    const resp = await fetch(GRADE_SIGNOFF_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        forNetID: item.netID,
+        assignmentId: submission.assignmentId,
+        outcome: progress.status,
+        graderRating: progress.graderRating ?? null,
+        commentText: body,
+      }),
+    });
+    const result = await resp.json().catch(() => ({ status: resp.status }));
+    if (result?.outcome === "graded") {
+      console.log(
+        `[CS 393 Buddy] graded ${submission.assignmentId} for ${item.netID}: ${result.score}`,
+      );
+    } else {
+      console.error(
+        `[CS 393 Buddy] couldn't grade ${submission.assignmentId} for ${item.netID}:`,
+        result,
+      );
+    }
+  } catch (err) {
+    console.error("[CS 393 Buddy] grade-signoff threw:", err);
+  }
+
+  try {
+    const queued = await sendCanvasSubmission({
       type: submission.type,
       assignmentId: submission.assignmentId,
       weekNum: submission.weekNum,
@@ -431,18 +481,14 @@ async function submitForStudent(item, progress) {
       forNetID: item.netID,
       data: submission.data,
     });
-    if (outcome.ok) {
-      console.log(
-        `[CS 393 Buddy] submitted ${submission.assignmentId} to Canvas for ${item.netID}`,
-      );
-    } else {
+    if (!queued.ok) {
       console.error(
-        `[CS 393 Buddy] couldn't submit ${submission.assignmentId} for ${item.netID}:`,
-        outcome.result,
+        `[CS 393 Buddy] couldn't queue ${submission.assignmentId} for ${item.netID}:`,
+        queued.result,
       );
     }
   } catch (err) {
-    console.error("[CS 393 Buddy] submit-for-student threw:", err);
+    console.error("[CS 393 Buddy] queue-for-student threw:", err);
   }
 }
 

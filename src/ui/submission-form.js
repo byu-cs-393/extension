@@ -26,7 +26,7 @@
 //     the student can retry.
 
 import { patchDoc } from "../platform/firestore.js";
-import { fillSubmissionTemplate } from "../data/submission-templates.js";
+import { queuedSubmission } from "../data/canvas-outbox.js";
 import { ASSIGNMENT_PROGRESS_CACHE_KEY } from "../data/assignment-progress.js";
 import { describeCanvasError, canvasErrorHint } from "../lib/canvas-error.js";
 
@@ -392,20 +392,30 @@ function buildFieldRow(field, prefillValue) {
   return row;
 }
 
-// Sends one submission to Canvas and records it on assignmentProgress.
+// Queues one submission to be sent to Canvas from the student's own browser.
 //
-// Shared by the modal and by the automatic submissions the dashboard
-// makes for TA-approved exams, so both take exactly the same path — the
-// idempotency marker, the submit count and the stored field values all
-// behave identically however the submission was triggered.
+// This used to POST through a Cloud Function that masqueraded as the
+// student. That can't work: the course's Canvas token has no become_user
+// permission, and Canvas reserves a submission to its author anyway. The
+// only thing that can submit as a student is their own logged-in Canvas
+// session. So the submission is recorded as pending on its progress doc,
+// and the canvas-submitter content script sends it from that session —
+// which also keeps to the course rule that the extension never does what a
+// student couldn't do themselves.
 //
-// Returns { ok, result }. Never throws for a Canvas-side failure; the
-// caller decides how to surface it.
-// `forNetID` submits on another student's behalf — only a TA's token is
-// allowed to, and the Cloud Function enforces that. When set, the caller
-// is NOT the student, so the local progress cache belongs to someone else
-// and must not be touched; the Firestore write still lands on the
-// student's own document.
+// Shared by the submit modal and by the dashboard's backfill of signoffs,
+// so both queue identically.
+//
+//   drain     open a Canvas tab now to send it. True when a student just
+//             clicked Submit — they're present and asked for it, so a tab
+//             that briefly opens and closes is expected. False for
+//             background queueing, which waits for their next visit to
+//             Canvas rather than popping a tab they didn't ask for.
+//   forNetID  queue onto another student's record. Only a TA can write
+//             there (Firestore rules), and the local cache belongs to the
+//             TA so it's left alone.
+//
+// Returns { ok, queued, result }. Never throws.
 export async function sendCanvasSubmission({
   type,
   assignmentId,
@@ -415,85 +425,60 @@ export async function sendCanvasSubmission({
   fieldValues = data,
   submissionType = "online_text_entry",
   forNetID = null,
+  drain = false,
 }) {
-  let payload;
-  if (submissionType === "online_url") {
-    payload = { assignmentId, submissionType, url: data.url };
-  } else {
-    payload = {
-      assignmentId,
-      submissionType,
-      body: fillSubmissionTemplate({ type, assignmentId, data }),
-    };
-  }
-  if (forNetID) payload.forNetID = forNetID;
-
-  const result = await new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { type: "submitCanvasAssignment", payload },
-      (r) => resolve(r),
-    );
+  const targetNetID = forNetID ?? netID;
+  const progressType = progressTypeFor({ type, assignmentId });
+  const pendingSubmission = queuedSubmission({
+    // The TEMPLATE type — what fillSubmissionTemplate is keyed on when the
+    // body is rendered at send time. Distinct from the progress doc's type.
+    type,
+    assignmentId,
+    weekNum,
+    data,
+    submissionType,
   });
 
-  if (result?.outcome !== "submitted") {
-    console.error("[CS 393 Buddy] Canvas submit failed:", result);
-    return { ok: false, result };
-  }
+  const fields = {
+    assignmentId,
+    type: progressType,
+    pendingSubmission,
+    // What was entered, so a resubmission can prefill from it. Not the
+    // rendered body: that's rebuilt from these inputs at send time, and
+    // stored HTML would only go stale against the template.
+    ...(forNetID ? {} : { canvasSubmissionData: fieldValues }),
+    ...(Number.isFinite(weekNum) ? { weekNum } : {}),
+  };
 
-  const submittedAt = Date.now();
-  const progressType = progressTypeFor({ type, assignmentId });
   try {
-    // Submitting for someone else: write their Firestore doc, but leave
-    // the local cache alone — it's this TA's, and the entry would be a
-    // stranger's progress sitting in their own dashboard.
-    if (forNetID) {
-      await patchDoc(`students/${forNetID}/assignmentProgress/${assignmentId}`, {
-        assignmentId,
-        type: progressType,
-        canvasSubmittedAt: submittedAt,
-        canvasSubmissionId: result.canvasSubmissionId ?? null,
-        ...(Number.isFinite(weekNum) ? { weekNum } : {}),
-      });
-      return { ok: true, result, submittedAt };
-    }
-    // Read the cached doc BEFORE writing, both to carry forward fields
-    // this caller doesn't own (signoff status) and to know how many times
-    // this has been submitted already.
-    const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
-    const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
-    const existing = bundle.progress?.[assignmentId] ?? {};
-    const priorCount = Number.isFinite(existing.canvasSubmitCount)
-      ? existing.canvasSubmitCount
-      : existing.canvasSubmittedAt
-        ? 1
-        : 0;
-
-    const newProgress = {
-      assignmentId,
-      type: progressType,
-      canvasSubmittedAt: submittedAt,
-      canvasSubmissionId: result.canvasSubmissionId ?? null,
-      canvasSubmitCount: priorCount + 1,
-      // What was entered, so a resubmission can prefill from it. Not the
-      // rendered body — that's Canvas's copy, and storing HTML here would
-      // only go stale against the template.
-      canvasSubmissionData: fieldValues,
-      ...(Number.isFinite(weekNum) ? { weekNum } : {}),
+    await patchDoc(`students/${targetNetID}/assignmentProgress/${assignmentId}`, fields);
+  } catch (err) {
+    console.error("[CS 393 Buddy] couldn't queue Canvas submission:", err);
+    return {
+      ok: false,
+      queued: false,
+      result: { outcome: "queue-failed", error: err?.message ?? String(err) },
     };
-
-    await patchDoc(`students/${netID}/assignmentProgress/${assignmentId}`, newProgress);
-    bundle.progress = {
-      ...(bundle.progress ?? {}),
-      [assignmentId]: { ...existing, ...newProgress },
-    };
-    bundle.syncedAt = Date.now();
-    await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
-  } catch (patchErr) {
-    // Non-fatal — Canvas has the submission. Log for visibility.
-    console.error("[CS 393 Buddy] canvasSubmittedAt patch failed:", patchErr);
   }
 
-  return { ok: true, result };
+  if (!forNetID) {
+    try {
+      const cached = await chrome.storage.local.get(ASSIGNMENT_PROGRESS_CACHE_KEY);
+      const bundle = cached[ASSIGNMENT_PROGRESS_CACHE_KEY] ?? { progress: {} };
+      const existing = bundle.progress?.[assignmentId] ?? {};
+      bundle.progress = { ...(bundle.progress ?? {}), [assignmentId]: { ...existing, ...fields } };
+      bundle.syncedAt = Date.now();
+      await chrome.storage.local.set({ [ASSIGNMENT_PROGRESS_CACHE_KEY]: bundle });
+    } catch (err) {
+      // Non-fatal: Firestore has it, and the next refresh will catch up.
+      console.warn("[CS 393 Buddy] local cache update failed:", err);
+    }
+    if (drain) {
+      chrome.runtime.sendMessage({ type: "canvasOutbox:drain" }).catch(() => {});
+    }
+  }
+
+  return { ok: true, queued: true, result: { outcome: "queued" } };
 }
 
 async function handleSubmit(opts, form, errorBanner, submitBtn) {
@@ -536,6 +521,9 @@ async function handleSubmit(opts, form, errorBanner, submitBtn) {
       data,
       fieldValues,
       submissionType: schema.submissionType ?? "online_text_entry",
+      // The student just clicked Submit, so send it now rather than at
+      // their next visit to Canvas.
+      drain: true,
     });
 
     if (!outcome.ok) {
