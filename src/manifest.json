@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "CS 393 Buddy",
   "version": "1.0.8",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwWa98aN+3eUDdN/tv0TaGTostHmzKC/rwHsm+W93UxIFAnDnlSyf8KrSBnR6d8YnuWSyyaxDVDbwfjsjT//A9p4Hvw1fOX44XvV2xcz891tnr4A78G4p6eLvU3simz9K5F51lgKbsVDEPWwJnnJEHH92dNhDwJwwOhmj9lXVO3ppz6FAuG1T2UViPpSEuz8qcDmhHXOYnpmunmge8oU0175sLQZKNqK03bJVBrUpAis2LvLSEPKwcmKPPvsE1y8kChxteTb/mCl/HmvcdC6TPJAj2RRG3F4i7UTPbNhjC0/eQol4m+Ajmqir+nM8d4fpTMUCZbtsXCe0cbKmZdZATQIDAQAB",
   "description": "Track your CS 393 weekly LeetCode work, pass off topic exams with a TA, and stay synced with Canvas.",
   "icons": {
     "16": "icons/icon-16.png",

@@ -5,6 +5,7 @@ import {
   firstUnsolvedProblem,
 } from "../data/course-data.js";
 import { getCachedAssignmentProgress } from "../data/assignment-progress.js";
+import { getAvailableUpdate, RELEASES_PAGE_URL } from "../platform/update-check.js";
 
 // Both panels + the sync pill and footer — the popup toggles between
 // the pre-onboarding welcome and the normal current-week view based on
@@ -24,6 +25,12 @@ const nextBtn = document.getElementById("popup-next-btn");
 const openDashboardBtn = document.getElementById("open-dashboard");
 const assessmentsCard = document.getElementById("popup-assessments");
 const assessmentList = document.getElementById("popup-assessment-list");
+const updateBanner = document.getElementById("popup-update");
+const updateVersion = document.getElementById("popup-update-version");
+const updateCurrent = document.getElementById("popup-update-current");
+const updateDownloadBtn = document.getElementById("popup-update-download");
+const updateExtensionsBtn = document.getElementById("popup-update-extensions");
+const updateNotesLink = document.getElementById("popup-update-notes");
 
 // Module-scoped state — render() reads from these.
 let currentCards = null;
@@ -123,7 +130,23 @@ function showOnboarded() {
   footer.hidden = false;
 }
 
+// Independent of onboarding: someone stuck partway through setup is
+// exactly who should be on the latest version.
+async function renderUpdate() {
+  const update = await getAvailableUpdate();
+  updateBanner.hidden = !update;
+  if (!update) return;
+  updateVersion.textContent = update.version;
+  updateCurrent.textContent = chrome.runtime.getManifest().version;
+  updateNotesLink.href = update.releaseUrl ?? RELEASES_PAGE_URL;
+  updateDownloadBtn.onclick = () => {
+    chrome.tabs.create({ url: update.zipUrl ?? update.releaseUrl ?? RELEASES_PAGE_URL });
+    window.close();
+  };
+}
+
 async function init() {
+  renderUpdate();
   const { netID } = await chrome.storage.sync.get("netID");
   if (!netID) {
     showWelcome();
@@ -163,6 +186,13 @@ nextBtn.addEventListener("click", () => {
 
 openDashboardBtn.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  window.close();
+});
+
+// A web page can't link to chrome://extensions, but an extension page can
+// open it. ?id= scrolls to this extension's card.
+updateExtensionsBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
   window.close();
 });
 
