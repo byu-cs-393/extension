@@ -144,18 +144,42 @@ we're piloting; dismissing it is fine. Don't click "Disable".
 
 ## Updates
 
-No auto-updates while we're piloting. When a new version is announced:
+The extension checks for new versions itself. When one is out, its
+toolbar icon shows a blue **NEW** badge, and clicking the icon walks you
+through it:
 
-1. Download the new zip from
-   **https://github.com/byu-cs-393/extension/releases/latest**
-2. Unzip it over the old folder, replacing everything
-3. `chrome://extensions` → the reload icon ↻ on CS 393 Buddy
-4. **Reload any open LeetCode tabs** — this step gets missed, and until
+1. Click **Download** in the popup (or get the zip from
+   **https://github.com/byu-cs-393/extension/releases/latest**) and unzip
+   it somewhere permanent, like next to the old one. Not Downloads
+2. `chrome://extensions` → **Load unpacked** → pick the **new** folder
+3. **Reload any open LeetCode tabs**. This step gets missed, and until
    you do it that tab isn't recording
 
-Your data lives in the cloud, not in the folder, so updating loses
-nothing. The version you have is shown on the extension's card at
+Loading the new folder replaces the old version in place, and you stay
+signed in: no new code, no Canvas submission, no relinking LeetCode. Once
+it's loaded you can delete the old folder.
+
+**Don't click Remove to update.** Removing erases what the extension
+remembers on your computer (your sign-in and linked LeetCode account), and
+you'd have to set it up again from scratch. Your coursework lives in the
+cloud, so it's safe either way.
+
+The version you have is shown on the extension's card at
 `chrome://extensions`.
+
+### Coming from 1.0.8 or earlier (once)
+
+Up to 1.0.8, Chrome gave the extension a new identity whenever it was
+loaded from a new folder. That's why every update used to mean setting it
+up again, and why two copies could end up installed at once. Newer
+versions keep the same identity, but getting onto one takes one last
+setup:
+
+1. `chrome://extensions` → **Remove** the old CS 393 Buddy
+2. Load the new folder as in **3. Load it** above, and go through
+   onboarding again
+
+After that, updates keep you signed in.
 
 ## Removing it
 

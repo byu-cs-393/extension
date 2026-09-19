@@ -247,3 +247,62 @@ body {
 .card-list li.complete {
   color: var(--success, #16a34a);
 }
+
+/* Update available. Sits under the header in both panel states. */
+.update {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.update-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.update-current {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.update-steps {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.update-steps li {
+  padding: 1px 0;
+}
+
+.update-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.update-actions .btn-primary {
+  width: auto;
+}
+
+.update-notes {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.update-notes:hover {
+  text-decoration: underline;
+}

@@ -14,6 +14,33 @@
       </div>
     </header>
 
+    <!-- A newer release is out. Filled and shown by popup.js from what the
+         background worker last heard from GitHub; see
+         platform/update-check.js. Shown before and after onboarding. -->
+    <section id="popup-update" class="update" hidden>
+      <div class="update-title">
+        Version <span id="popup-update-version"></span> is out
+        <span class="update-current">(you have <span id="popup-update-current"></span>)</span>
+      </div>
+      <ol class="update-steps">
+        <li>Download it and unzip it somewhere permanent, like Documents (not Downloads)</li>
+        <li>At chrome://extensions, click <strong>Load unpacked</strong> and pick the new folder</li>
+        <li>Reload any open LeetCode tabs</li>
+      </ol>
+      <p class="update-note">It replaces this version. You stay signed in.</p>
+      <div class="update-actions">
+        <button type="button" class="btn-primary" id="popup-update-download">Download</button>
+        <button type="button" class="btn-secondary" id="popup-update-extensions">Open chrome://extensions</button>
+      </div>
+      <a
+        class="update-notes"
+        id="popup-update-notes"
+        target="_blank"
+        rel="noopener noreferrer"
+        >What changed</a
+      >
+    </section>
+
     <!-- Pre-onboarding state: compact welcome + Continue setup button.
          Hidden by default; popup.js toggles based on whether a netID is
          on file in chrome.storage.sync. -->

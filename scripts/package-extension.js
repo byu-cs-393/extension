@@ -153,5 +153,10 @@ console.log(
   4. Tell students: https://github.com/byu-cs-393/extension/releases/latest
 
 Students need the zip only — INSTALL.md is in the repo and linked from
-the release page.`,
+the release page. Their copies notice the new release within six hours
+(sooner if they restart Chrome) and badge the toolbar icon.
+
+Never change "key" in src/manifest.json. It keeps the extension's ID the
+same from release to release, which is what keeps students signed in
+when they load a new version. tests/extension-id.test.js guards it.`,
 );
